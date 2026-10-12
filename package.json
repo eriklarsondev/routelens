@@ -1,0 +1,88 @@
+{
+  "name": "routelens",
+  "version": "0.1.0",
+  "description": "See every endpoint in your app. Scans client and server code, maps routes to the calls that hit them, and gives you one keystroke access to any of them.",
+  "keywords": [
+    "routes",
+    "endpoints",
+    "api",
+    "next",
+    "express",
+    "fastify",
+    "hono",
+    "nest",
+    "fastapi",
+    "devtool",
+    "cli"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/server/index.js",
+  "types": "./dist/server/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./fetch": {
+      "types": "./dist/server/fetch-handler.d.ts",
+      "import": "./dist/server/fetch-handler.js"
+    },
+    "./vite": {
+      "types": "./dist/server/vite.d.ts",
+      "import": "./dist/server/vite.js"
+    },
+    "./scan": {
+      "types": "./dist/server/scan.d.ts",
+      "import": "./dist/server/scan.js"
+    },
+    "./package.json": "./package.json",
+    "./auto": {
+      "types": "./dist/server/auto/preload.d.ts",
+      "import": "./dist/server/auto/preload.js",
+      "require": "./dist/server/auto/preload.js"
+    },
+    "./wire": {
+      "types": "./dist/server/auto/wire.d.ts",
+      "import": "./dist/server/auto/wire.js"
+    }
+  },
+  "bin": {
+    "routelens": "./dist/server/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsc && chmod +x dist/server/cli.js",
+    "build:client": "node build.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.client.json",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build",
+    "test": "npm run build && node --test \"test/*.test.js\"",
+    "lens": "npm run build && node dist/server/cli.js",
+    "postinstall": "node -e \"import('./dist/server/auto/postinstall.js').catch(()=>{})\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "esbuild": "^0.28.2",
+    "lucide-react": "^1.55.0",
+    "radix-ui": "^1.8.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.7.2"
+  }
+}
