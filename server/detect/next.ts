@@ -10,8 +10,13 @@ const PAGES_SKIP = new Set(['_app', '_document', '_error', '_middleware', 'middl
  * (`pages/api/**`, `pages/**`). Paths come from the directory structure, methods
  * from the exported handler names.
  */
-export function detectNext(file: ScannedFile, masked: string): RawRoute[] {
+export function detectNext(file: ScannedFile, masked: string, isNextProject = true): RawRoute[] {
   if (file.ext === '.py') return [];
+
+  // `pages/` and `app/` are ordinary folder names outside Next. A Vite SPA with
+  // `src/pages/Account.tsx` has components there, not routes, so a project that
+  // demonstrably does not depend on Next contributes no Next routes.
+  if (!isNextProject) return [];
 
   const segments = file.rel.split('/');
   const filename = segments[segments.length - 1]!;

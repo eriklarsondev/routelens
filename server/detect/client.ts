@@ -9,11 +9,15 @@ export interface RawCall {
   /** The URL with local string constants substituted in, when any applied. */
   resolved?: string;
   library: ClientLibrary;
+  /** Identifier the request went through, when it was a configured instance. */
+  via?: string;
   line: number;
   offset: number;
 }
 
 const DEFAULT_CLIENT_IDENTIFIERS = [
+  'api',
+  'http',
   'axios',
   'ky',
   'got',
@@ -56,7 +60,13 @@ export function detectClientCalls(
   const calls: RawCall[] = [];
   const constants = collectStringConstants(masked);
   const usedAsBase = new Set<string>();
-  const push = (match: RegExpMatchArray, raw: string, library: ClientLibrary, method: Method) => {
+  const push = (
+    match: RegExpMatchArray,
+    raw: string,
+    library: ClientLibrary,
+    method: Method,
+    via?: string,
+  ) => {
     const offset = match.index ?? 0;
     const resolved = substituteConstants(raw, constants, usedAsBase);
     calls.push({
@@ -64,6 +74,7 @@ export function detectClientCalls(
       raw,
       ...(resolved === raw ? {} : { resolved }),
       library,
+      ...(via ? { via } : {}),
       line: lineOf(masked, offset),
       offset,
     });
@@ -83,7 +94,7 @@ export function detectClientCalls(
     'g',
   );
   for (const match of masked.matchAll(verbRe)) {
-    push(match, match[4]!, libraryOf(match[1]!), toMethod(match[2]));
+    push(match, match[4]!, libraryOf(match[1]!), toMethod(match[2]), match[1]!);
   }
 
   // axios('/api/users', { method }) and axios({ url: '/api/users', method })

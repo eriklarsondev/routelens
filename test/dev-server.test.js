@@ -102,3 +102,54 @@ test('never points at the dashboard’s own port', async (t) => {
   const guess = await guessDevServer(root, 4477);
   assert.notEqual(guess.port, 4477);
 });
+
+test('a declared app URL settles the port and the path prefix together', async (t) => {
+  // Exactly vera's shape: PORT names a different service, and the URL the app
+  // is actually served on lives in BASE_URL — prefix and all.
+  const root = project({
+    'package.json': JSON.stringify({ dependencies: { express: '4.19.0' } }),
+    '.env': [
+      'NODE_PORT=4000',
+      'PORT=3000',
+      'BASE_URL="http://localhost:4000/vera-portal"',
+      'STRIPE_RETURN_URL="http://localhost:4000/vera-portal/payments?status=complete"',
+    ].join('\n'),
+  });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const guess = await guessDevServer(root);
+  assert.equal(guess.url, 'http://localhost:4000/vera-portal', 'prefix is kept');
+  assert.equal(guess.port, 4000, 'BASE_URL beats the bare PORT');
+  assert.match(guess.reason, /BASE_URL/);
+});
+
+test('ignores a URL that is not the app root, and one that is not local', async (t) => {
+  const root = project({
+    'package.json': JSON.stringify({ dependencies: { express: '4.19.0' } }),
+    '.env': [
+      'PORT=3100',
+      // Neither of these says where the app is being served right now.
+      'STRIPE_RETURN_URL="http://localhost:9999/checkout"',
+      'BASE_URL="https://app.example.com/live"',
+    ].join('\n'),
+  });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const guess = await guessDevServer(root);
+  assert.equal(guess.port, 3100, 'falls back to the stated PORT');
+  assert.equal(guess.url, 'http://localhost:3100', 'no prefix invented');
+});
+
+test('prefers the most general declared URL when several are local', async (t) => {
+  const root = project({
+    'package.json': JSON.stringify({ dependencies: { express: '4.19.0' } }),
+    '.env': [
+      'PARTICIPANT_APP_URL="http://localhost:4000/portal/participant"',
+      'VITE_BASE_URL="http://localhost:4000/portal"',
+    ].join('\n'),
+  });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const guess = await guessDevServer(root);
+  assert.equal(guess.url, 'http://localhost:4000/portal', 'the shallower, framework-prefixed key wins');
+});

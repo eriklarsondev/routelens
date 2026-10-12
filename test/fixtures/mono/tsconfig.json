@@ -1,0 +1,9 @@
+{
+  // A path alias, with the comments and trailing commas real tsconfigs carry.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./client/src/*"],
+    },
+  },
+}

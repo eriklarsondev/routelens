@@ -99,6 +99,13 @@ function simpleName(expression: string): string {
 export interface ParsedUrl {
   path: string;
   host?: string;
+  /**
+   * The origin came from an expression we could not resolve, so the request may
+   * well leave this app — `${getSiteBaseUrl()}/oauth/token` is someone else's
+   * endpoint. The path is still worth listing; it is just not evidence of a
+   * missing route.
+   */
+  originUnknown?: boolean;
 }
 
 /**
@@ -110,13 +117,17 @@ export function parseClientUrl(raw: string): ParsedUrl | null {
   let value = raw.trim();
   if (!value) return null;
 
-  // `${BASE_URL}/api/users` -> same-origin `/api/users`
+  // `${BASE_URL}/api/users` -> `/api/users`, with the origin left open. By the
+  // time we get here a `${BASE}` naming a local string constant has already
+  // been substituted, so whatever is left really is unknowable.
+  let originUnknown = false;
   const leadingExpression = /^\$\{[^}]*\}/.exec(value);
   if (leadingExpression) {
     value = value.slice(leadingExpression[0].length);
     // Just an expression and nothing else — there is no endpoint to report.
     if (value === '' || value === '/') return null;
     if (!value.startsWith('/')) value = '/' + value;
+    originUnknown = true;
   }
 
   const absolute = /^(https?:)?\/\/([^/?#]+)(\/[^?#]*)?/i.exec(value);
@@ -133,7 +144,10 @@ export function parseClientUrl(raw: string): ParsedUrl | null {
   // is decided at runtime, so report it as a wildcard instead of inventing one.
   if (/^\/?\$\{[^}]*\}\/?$/.test(value)) return { path: '/*' };
 
-  return { path: normalizePath(canonicalizeParams(value)) };
+  return {
+    path: normalizePath(canonicalizeParams(value)),
+    ...(originUnknown ? { originUnknown } : {}),
+  };
 }
 
 /** A pattern where every dynamic segment is a wildcard, for route matching. */

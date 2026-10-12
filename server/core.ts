@@ -106,6 +106,8 @@ export function createLens(options: RouteLensOptions = {}): Lens {
         // Where the endpoint links should point. Unset when mounted on the app
         // itself, since then the dashboard is already on the right origin.
         target: target ?? null,
+        targetReason: options.targetReason ?? null,
+        targetLive: options.targetLive ?? null,
         mode: target ? 'standalone' : 'mounted',
       });
     }

@@ -10,7 +10,7 @@ Then open <http://localhost:4477/__routelens>, or mount it on your own dev serve
 
 routelens reads your source code. It does not run it, and it never sends a request to one of your endpoints. The only route it ever adds to your app is its own dashboard.
 
-The dashboard is a React app built with shadcn/ui and Tailwind, bundled at publish time into two static files that routelens serves itself — so **nothing is added to your dependency tree**, there is no CDN request, and the page works offline and under a strict CSP. It follows your system theme and has a light/dark/system toggle that remembers your choice.
+The dashboard is a React app built with Tailwind, bundled at publish time into two static files that routelens serves itself — so **nothing is added to your dependency tree**, there is no CDN request, and the page works offline and under a strict CSP. It follows your system theme and has a light/dark/system toggle that remembers your choice.
 
 ---
 
@@ -19,10 +19,14 @@ The dashboard is a React app built with shadcn/ui and Tailwind, bundled at publi
 - **Server-side** — every route your app answers: Next.js App Router and Pages API, Express, Hono, Fastify, Koa, NestJS, FastAPI, Flask, Django URLs.
 - **Client-side** — every request your app makes: `fetch`, `axios`, `ky`, `got`, SWR, Nuxt `$fetch`/`useFetch`, `WebSocket`, `EventSource`, plus endpoint constants like `const USERS = '/api/users'`.
 - **The link between them** — each server route lists the client files that call it; each client call links to the handler that answers it.
-- **Issues** — client calls with no matching route (typos, deleted endpoints) and routes nothing in the repo calls. Only confident findings land here: URLs assembled at runtime and bare string constants are listed on the client side but never accused of being broken.
+- **Issues** — client calls with no matching route (typos, deleted endpoints), routers nothing mounts, and routes nothing in the repo calls. Only confident findings land here: URLs assembled at runtime and bare string constants are listed on the client side but never accused of being broken.
 - **One click to the endpoint** — open it in a tab, copy the URL, copy a ready-made curl, or jump straight to the source line in your editor.
 
-Keyboard: `/` filter, `j`/`k` move, `↵` open in a tab, `o` open the source.
+The first card names the base every path below is relative to — the URL, where it was detected from, and whether anything is answering there — so a wrong base is obvious before you click anything.
+
+Endpoints are grouped into a card per topic, ordered GET, POST, PUT, PATCH, DELETE. Each card header pins as you scroll it and carries a switch per method with its count, so you can hide every GET in a 119-route topic and see what is left.
+
+Keyboard: `/` filter, `↑`/`↓` move across cards, `←`/`→` pick a method and `space` to show or hide it, `↵` open in a tab, `o` open the source, `esc` clear the selection. `j`/`k`/`h`/`l` work too.
 
 ## Install
 
@@ -59,6 +63,8 @@ npx routelens --open
 ```
 
 It finds your dev server by reading your `dev` script, your `.env`, and your framework's default port, then probing for one that answers. Override with `--target http://localhost:5173` when it guesses wrong.
+
+A declared URL wins over a bare port, because it settles the prefix too: `BASE_URL="http://localhost:4000/vera-portal"` makes `/api/status` link to `http://localhost:4000/vera-portal/api/status`, which is where it actually answers. routelens reads `BASE_URL`, `APP_URL`, `SITE_URL`, `PUBLIC_URL`, `SERVER_URL` and `ORIGIN`, with the usual `VITE_` / `NEXT_PUBLIC_` / `REACT_APP_` prefixes — and only when they point somewhere local, since a deployed URL is not where your app is running now.
 
 ### 4. Mount it explicitly
 
@@ -165,6 +171,7 @@ routelens({
   extensions: [...],          // file types to read
   includePages: true,         // list page routes, not just APIs
   includeExternal: true,      // list calls to other hosts
+  includeTests: false,        // scan test and fixture files too
   apiPrefixes: ['/api', '/v1', '/trpc', '/graphql', ...],
   clientIdentifiers: [],      // e.g. ['apiClient'] if you wrap your HTTP client
   maxFiles: 20000,
@@ -177,11 +184,20 @@ routelens({
 
 Static analysis — the scan reads files, masks out comments, and matches the registration patterns each framework uses. Paths are normalized to one shape (`[id]`, `{id}`, `<int:id>` and `:id` all become `:id`) so a client call can be matched to the route that serves it. Express-style routers are followed across files, so `app.use('/api/v1', usersRouter)` plus `router.get('/:id')` is reported as `GET /api/v1/users/:id`.
 
+Client calls get the same treatment from the other side: an instance configured with `axios.create({ baseURL: '/api' })` and imported across the app has that base folded back in, so `api.get('/users')` is reported as the `/api/users` it actually requests.
+
 This means:
 
 - Commented-out routes are not listed. Dynamically generated ones (`app.get(buildPath(x))`) are not either — there is no string to read.
-- Mount prefixes resolve through relative imports. A router pulled in through an alias or a barrel file may be listed at its unprefixed path.
+- Mount prefixes resolve through relative imports and through `paths` aliases in `tsconfig.json`/`jsconfig.json`.
+- A path is only reported as an endpoint when routelens can trace it back to something that serves it — an app, or a file that wires the routers together. A `Router()` nothing mounts has no URL at all, so its handlers are listed under **not mounted** rather than at a root path they would never answer on. That covers dead code as well as a mount routelens could not follow.
 - Pages API handlers are listed per method it can see (`req.method === 'POST'`); if it can't tell, it lists `ALL`.
+
+And some things are deliberately left out, because listing them is worse than missing them:
+
+- **Tests and fixtures.** A suite's hardcoded URLs are neither endpoints your app serves nor requests it makes, and they are full of fixture ids that look like broken calls. `test/`, `tests/`, `__tests__/`, `e2e/`, `cypress/` and `*.test.*` / `*.spec.*` files are skipped — pass `includeTests: true` to scan them anyway.
+- **`pages/` and `app/` outside a Next project.** They are ordinary folder names; a Vite app's `src/pages/Account.tsx` is a component, not a route. Next detection needs a `next` dependency or a `next.config.*` to go on.
+- **Routes on something that is not a router.** `x.get('/users')` only registers a route when `x` is a router you constructed or a conventional name for one (`app`, `router`, `*Router`). Otherwise it is read as a client call, which is what `api.get('/users')` in a component really is.
 
 Everything it finds carries its `file:line`, so a wrong guess is one click away from the truth.
 
@@ -196,13 +212,12 @@ server/            the Node side — scanner, detectors, HTTP handlers, CLI
   fetch-handler.ts   Request/Response adapter (Next, Hono, Remix, Bun, Deno)
   vite.ts            Vite plugin
   cli.ts             routelens / routelens list / routelens json
-client/            the dashboard — React + shadcn/ui + Tailwind v4
+client/            the dashboard — React + Tailwind v4, no component library
   App.tsx            state, filtering, keyboard navigation
-  components/        Header, Toolbar, EndpointList, DetailPanel, StatusBar
+  components/        TopBar, EndpointList, DetailPanel, StatusBar
   components/theme   provider and the light/dark/system toggle
-  components/ui/     vendored shadcn components (yours to edit)
-  styles.css         Tailwind entry and the shadcn theme tokens
-test/              node:test suites plus two fixture projects
+  styles.css         Tailwind entry and the theme tokens
+test/              node:test suites plus fixture projects
 ```
 
 ```bash
@@ -211,11 +226,8 @@ npm run typecheck    # both tsconfigs
 npm test             # build, then run the suites
 npm run lens         # build and open the dashboard on this repo
 
-node scripts/vendor-shadcn.mjs   # re-pull shadcn component sources
 node scripts/check-theme.mjs     # drive the theme toggle in a real browser
 ```
-
-The shadcn components are **vendored, not depended on** — `client/components/ui/*` is ordinary source you can edit. Re-run the vendor script to pick up upstream changes; it only rewrites the import alias.
 
 ## Contributing
 
@@ -225,7 +237,7 @@ history lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 
-Node 18+ to run. **No runtime dependencies** — React, Radix, Tailwind, esbuild and TypeScript are build-time only and never reach your `node_modules`. What ships is the compiled server plus two static assets.
+Node 18+ to run. **No runtime dependencies** — React, Tailwind, esbuild and TypeScript are build-time only and never reach your `node_modules`. What ships is the compiled server plus two static assets.
 
 ## License
 

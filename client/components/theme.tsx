@@ -1,29 +1,18 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Monitor, Moon, Sun } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { Monitor, Moon, Sun } from '@/components/icons';
+import { CONTROL } from '@/lib/utils';
 
 export type Theme = 'light' | 'dark' | 'system';
 
 const STORAGE_KEY = 'routelens-theme';
+const ORDER: Theme[] = ['system', 'light', 'dark'];
 
-interface ThemeContextValue {
-  theme: Theme;
-  resolved: 'light' | 'dark';
-  setTheme: (theme: Theme) => void;
-}
+const ThemeContext = createContext<{ theme: Theme; cycle: () => void } | null>(null);
 
-const ThemeContext = createContext<ThemeContextValue | null>(null);
-
-function readStoredTheme(): Theme {
+function stored(): Theme {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+    const value = localStorage.getItem(STORAGE_KEY);
+    if (value === 'light' || value === 'dark' || value === 'system') return value;
   } catch {
     // Private browsing and friends: fall through to the system preference.
   }
@@ -31,78 +20,54 @@ function readStoredTheme(): Theme {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(readStoredTheme);
-  const [systemDark, setSystemDark] = useState(
-    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-  );
+  const [theme, setTheme] = useState<Theme>(stored);
 
   useEffect(() => {
     const query = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
-    query.addEventListener('change', onChange);
-    return () => query.removeEventListener('change', onChange);
-  }, []);
+    const apply = () => {
+      const dark = theme === 'system' ? query.matches : theme === 'dark';
+      document.documentElement.classList.toggle('dark', dark);
+      document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    };
+    apply();
 
-  const resolved = theme === 'system' ? (systemDark ? 'dark' : 'light') : theme;
+    // Only `system` needs to follow the OS once it changes under us.
+    if (theme !== 'system') return;
+    query.addEventListener('change', apply);
+    return () => query.removeEventListener('change', apply);
+  }, [theme]);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    root.classList.toggle('dark', resolved === 'dark');
-    root.style.colorScheme = resolved;
-  }, [resolved]);
-
-  const setTheme = useCallback((next: Theme) => {
-    setThemeState(next);
+  const cycle = () => {
+    const next = ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length]!;
+    setTheme(next);
     try {
       localStorage.setItem(STORAGE_KEY, next);
     } catch {
       // Not being able to remember the choice is not worth failing over.
     }
-  }, []);
+  };
 
-  const value = useMemo(() => ({ theme, resolved, setTheme }), [theme, resolved, setTheme]);
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return <ThemeContext.Provider value={{ theme, cycle }}>{children}</ThemeContext.Provider>;
 }
 
-export function useTheme(): ThemeContextValue {
-  const context = useContext(ThemeContext);
-  if (!context) throw new Error('useTheme must be used inside ThemeProvider');
-  return context;
-}
-
-const OPTIONS: Array<{ value: Theme; label: string; icon: typeof Sun }> = [
-  { value: 'light', label: 'Light', icon: Sun },
-  { value: 'dark', label: 'Dark', icon: Moon },
-  { value: 'system', label: 'System', icon: Monitor },
-];
+const ICON = { system: Monitor, light: Sun, dark: Moon };
 
 export function ThemeToggle() {
-  const { theme, resolved, setTheme } = useTheme();
+  const context = useContext(ThemeContext);
+  if (!context) throw new Error('ThemeToggle must be used inside ThemeProvider');
+
+  const Glyph = ICON[context.theme];
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={`Theme: ${theme}`}>
-          <Sun className="scale-100 rotate-0 transition-transform duration-200 dark:scale-0 dark:-rotate-90" />
-          <Moon className="absolute scale-0 rotate-90 transition-transform duration-200 dark:scale-100 dark:rotate-0" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-32">
-        {OPTIONS.map(({ value, label, icon: Icon }) => (
-          <DropdownMenuItem
-            key={value}
-            onClick={() => setTheme(value)}
-            data-active={theme === value}
-            className="data-[active=true]:bg-accent"
-          >
-            <Icon className="text-muted-foreground" />
-            {label}
-            {value === 'system' ? (
-              <span className="text-muted-foreground ml-auto text-[10px] uppercase">{resolved}</span>
-            ) : null}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <button
+      type="button"
+      onClick={context.cycle}
+      title="Switch theme"
+      className={CONTROL}
+    >
+      <Glyph />
+      {/* A fixed width so cycling the label does not resize the button. */}
+      <span className="w-10 text-center capitalize">{context.theme}</span>
+    </button>
   );
 }

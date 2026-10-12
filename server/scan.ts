@@ -1,12 +1,15 @@
 import { resolve } from 'node:path';
+import { analyzeClientBase, createBaseResolver, type ClientBaseAnalysis } from './detect/client-base.js';
 import { detectClientCalls } from './detect/client.js';
+import { createModuleResolver } from './detect/resolve.js';
 import { detectNest, findNestGlobalPrefix } from './detect/nest.js';
 import { detectNext } from './detect/next.js';
+import { createNextProjectTest } from './detect/next-project.js';
 import { analyzeNodeServer, resolveNodeRoutes, type NodeServerAnalysis } from './detect/node-server.js';
 import { detectPython } from './detect/python.js';
 import type { RawRoute } from './detect/shared.js';
 import { maskComments } from './mask.js';
-import { isDynamic, parseClientUrl, pathMatches } from './paths.js';
+import { isDynamic, joinPath, parseClientUrl, pathMatches } from './paths.js';
 import type {
   ClientCall,
   Framework,
@@ -33,12 +36,14 @@ export function scan(options: ScanOptions = {}): ScanResult {
     ignore: options.ignore,
     extensions: options.extensions,
     maxFiles: options.maxFiles,
+    includeTests: options.includeTests,
   });
   if (truncated) {
     warnings.push(`Stopped after ${files.length} files. Narrow the scan with \`ignore\` or \`root\`.`);
   }
 
   const fileIndex = new Set(files.map((file) => file.rel));
+  const resolveModule = createModuleResolver(root, fileIndex);
   const masked = new Map<string, string>();
   for (const file of files) masked.set(file.rel, maskComments(file.text, file.ext));
 
@@ -52,16 +57,27 @@ export function scan(options: ScanOptions = {}): ScanResult {
     }
   }
 
+  // Configured client instances resolve across files, so they are collected up
+  // front — a call site may be scanned long before the module that configures
+  // the instance it uses.
+  const clientBases: ClientBaseAnalysis[] = [];
+  for (const file of files) {
+    const analysis = analyzeClientBase(file, masked.get(file.rel)!);
+    if (analysis) clientBases.push(analysis);
+  }
+  const baseFor = createBaseResolver(clientBases, resolveModule);
+
   const routes: ServerRoute[] = [];
   const calls: ClientCall[] = [];
   const analyses: NodeServerAnalysis[] = [];
   const frameworks = new Set<Framework>();
+  const isNextProject = createNextProjectTest(root);
 
   for (const file of files) {
     const text = masked.get(file.rel)!;
     const before = routes.length;
 
-    addRoutes(routes, frameworks, file.rel, detectNext(file, text));
+    addRoutes(routes, frameworks, file.rel, detectNext(file, text, isNextProject(file.rel)));
     addRoutes(routes, frameworks, file.rel, detectNest(file, text, nestGlobalPrefix));
     addRoutes(routes, frameworks, file.rel, detectPython(file, text));
 
@@ -80,20 +96,26 @@ export function scan(options: ScanOptions = {}): ScanResult {
       const parsed = parseClientUrl(call.resolved ?? call.raw);
       if (!parsed) continue;
       if (parsed.host && !includeExternal) continue;
+
+      // A base path only applies to a same-origin request: an absolute URL
+      // already says where it is going.
+      const base = parsed.host || !call.via ? undefined : baseFor(file.rel, call.via);
+      const path = base ? joinPath(base, parsed.path) : parsed.path;
+
       calls.push({
-        id: `call:${file.rel}:${call.line}:${call.method}:${parsed.host ?? ''}${parsed.path}`,
+        id: `call:${file.rel}:${call.line}:${call.method}:${parsed.host ?? ''}${path}`,
         method: call.method,
-        path: parsed.path,
+        path,
         host: parsed.host,
         raw: call.raw,
         library: call.library,
-        dynamic: parsed.path.includes('*'),
+        dynamic: path.includes('*') || Boolean(parsed.originUnknown),
         source: { file: file.rel, line: call.line },
       });
     }
   }
 
-  for (const [rel, resolved] of resolveNodeRoutes(analyses, fileIndex)) {
+  for (const [rel, resolved] of resolveNodeRoutes(analyses, resolveModule)) {
     addRoutes(routes, frameworks, rel, resolved);
   }
 
@@ -110,8 +132,12 @@ export function scan(options: ScanOptions = {}): ScanResult {
   const unmatchedCalls = dedupedCalls.filter(
     (call) => !call.routeId && !call.host && !call.dynamic && call.library !== 'literal',
   );
+  const unmountedRoutes = deduped.filter((route) => !route.mounted);
+
+  // An unmounted route is not reported as uncalled as well: nothing can call a
+  // handler that answers at no URL, so saying so twice adds nothing.
   const uncalledRoutes = deduped.filter(
-    (route) => route.kind === 'api' && route.callers.length === 0,
+    (route) => route.kind === 'api' && route.mounted && route.callers.length === 0,
   );
 
   return {
@@ -121,6 +147,7 @@ export function scan(options: ScanOptions = {}): ScanResult {
     calls: dedupedCalls,
     unmatchedCalls,
     uncalledRoutes,
+    unmountedRoutes,
     warnings,
     stats: {
       filesScanned: files.length,
@@ -131,6 +158,7 @@ export function scan(options: ScanOptions = {}): ScanResult {
       calls: dedupedCalls.length,
       unmatchedCalls: unmatchedCalls.length,
       uncalledRoutes: uncalledRoutes.length,
+      unmountedRoutes: unmountedRoutes.length,
     },
   };
 }
@@ -151,6 +179,7 @@ function addRoutes(
       framework: route.framework,
       source: { file: rel, line: route.line },
       dynamic: isDynamic(route.path),
+      mounted: route.mounted ?? true,
       callers: [],
     });
   }
@@ -189,8 +218,10 @@ function compareRoutes(a: ServerRoute, b: ServerRoute): number {
  * catch-all handler.
  */
 function match(routes: ServerRoute[], calls: ClientCall[]): void {
-  const apiRoutes = routes.filter((route) => route.kind === 'api');
-  const pageRoutes = routes.filter((route) => route.kind === 'page');
+  // An unmounted route answers at no URL, so it cannot be what a call reached.
+  const servable = routes.filter((route) => route.mounted);
+  const apiRoutes = servable.filter((route) => route.kind === 'api');
+  const pageRoutes = servable.filter((route) => route.kind === 'page');
 
   for (const call of calls) {
     if (call.host) continue;

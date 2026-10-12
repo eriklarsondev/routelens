@@ -11,6 +11,11 @@ const METHOD_COLOR: Record<string, string> = {
   SSE: 'text-method-realtime',
 };
 
+/** The text colour a method is drawn in, wherever it appears. */
+export function methodColor(method: string): string {
+  return METHOD_COLOR[method] ?? 'text-method-other';
+}
+
 export function MethodBadge({
   method,
   className,
@@ -24,7 +29,7 @@ export function MethodBadge({
         'inline-flex items-center justify-center rounded-sm border px-1.5 py-0.5',
         'font-mono text-[10px] leading-none font-semibold tracking-wide',
         'border-current/25 bg-current/8',
-        METHOD_COLOR[method] ?? 'text-method-other',
+        methodColor(method),
         className,
       )}
     >
@@ -43,8 +48,10 @@ export function PathText({
   host?: string;
   className?: string;
 }) {
+  // How it overflows is the caller's call: a list row clips to one line, the
+  // detail heading wraps. Baking in `truncate` here fought both.
   return (
-    <span className={cn('truncate font-mono text-[13px]', className)}>
+    <span className={cn('font-mono text-[13px]', className)}>
       {host ? <span className="text-muted-foreground">{host}</span> : null}
       {path.split('/').map((segment, index) => (
         <span key={index}>

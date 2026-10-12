@@ -166,6 +166,8 @@ async function main(): Promise<void> {
     port: args.port,
     basePath: args.basePath,
     target,
+    targetReason: guess ? guess.reason : '--target',
+    targetLive: guess ? guess.live : undefined,
   });
 
   const result = lens.result();
@@ -192,7 +194,7 @@ function filterResult(result: ScanResult, filter: Args['filter']) {
   if (filter === 'issues') {
     return {
       ...result,
-      routes: result.uncalledRoutes,
+      routes: [...result.unmountedRoutes, ...result.uncalledRoutes],
       calls: result.unmatchedCalls,
     };
   }
@@ -224,6 +226,10 @@ function printList(result: ScanResult, filter: Args['filter']): void {
   if (filter === 'issues') {
     header('CLIENT CALLS WITH NO SERVER ROUTE', result.unmatchedCalls.length);
     for (const call of result.unmatchedCalls) out.push(callLine(call));
+    if (result.unmountedRoutes.length > 0) {
+      header('HANDLERS ON A ROUTER NOTHING MOUNTS', result.unmountedRoutes.length);
+      for (const route of result.unmountedRoutes) out.push(routeLine(route));
+    }
     header('SERVER ROUTES WITH NO CALLER IN THIS REPO', result.uncalledRoutes.length);
     for (const route of result.uncalledRoutes) out.push(routeLine(route));
   }
@@ -239,8 +245,9 @@ function printList(result: ScanResult, filter: Args['filter']): void {
 }
 
 function routeLine(route: ServerRoute): string {
-  const callers =
-    route.kind === 'page'
+  const callers = !route.mounted
+    ? dim('← not mounted')
+    : route.kind === 'page'
       ? ''
       : route.callers.length > 0
         ? dim(`← ${route.callers.length} call${route.callers.length === 1 ? '' : 's'}`)

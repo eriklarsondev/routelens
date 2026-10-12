@@ -50,3 +50,10 @@ test('still matches the concrete calls', () => {
   assert.equal(items.callers.length, 1);
   assert.match(items.callers[0].source.file, /client\/api\.ts$/);
 });
+
+test('a plugin registered without options keeps its own paths', () => {
+  // `app.register(statusRoutes)` — no options object, so no prefix.
+  assert.ok(has('GET', '/status'), 'registered at the path it declares');
+  assert.equal(has('GET', '/api/v2/status'), false, 'no prefix invented');
+  assert.equal(result.stats.unmountedRoutes, 0, 'not mistaken for an unmounted plugin');
+});

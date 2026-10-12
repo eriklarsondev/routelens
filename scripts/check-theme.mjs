@@ -119,32 +119,31 @@ const lightBg = await evaluate('getComputedStyle(document.body).backgroundColor'
 record('background differs between themes', darkBg !== lightBg, true);
 process.stdout.write(`       dark=${darkBg}  light=${lightBg}\n`);
 
-// 5. The dropdown opens and switches the theme.
-await evaluate(`
-  const trigger = document.querySelector('[aria-label^="Theme"]');
-  trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, isPrimary: true }));
-  trigger.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, isPrimary: true }));
-  trigger.click();
-`);
-await sleep(400);
-record('menu opens', await evaluate('!!document.querySelector("[role=menu]")'), true);
+// 5. The toggle cycles system -> light -> dark, and says which one is on.
+const clickToggle = () =>
+  evaluate(`document.querySelector('[title="Switch theme"]').click()`);
+
 record(
-  'menu offers all three modes',
-  await evaluate('document.querySelectorAll("[role=menuitem]").length'),
-  3,
+  'the toggle names the current mode',
+  await evaluate(`document.querySelector('[title="Switch theme"]').textContent.trim()`),
+  'light',
 );
 
-await evaluate(`
-  [...document.querySelectorAll('[role=menuitem]')]
-    .find((item) => item.textContent.trim().startsWith('Dark'))
-    ?.click();
-`);
-await sleep(300);
-record('choosing Dark applies it', await evaluate('document.documentElement.classList.contains("dark")'), true);
+await clickToggle();
+await sleep(200);
 record(
-  'choice is persisted',
+  'light cycles to dark',
   await evaluate("localStorage.getItem('routelens-theme')"),
   'dark',
+);
+record('dark is applied', await evaluate('document.documentElement.classList.contains("dark")'), true);
+
+await clickToggle();
+await sleep(200);
+record(
+  'dark cycles back to system',
+  await evaluate("localStorage.getItem('routelens-theme')"),
+  'system',
 );
 
 socket.close();

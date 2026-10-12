@@ -93,14 +93,11 @@ and no PostCSS. The candidate scanner in `build.mjs` is a plain tokenizer over
 `client/` — if a utility class mysteriously does not apply, that is the first
 place to look.
 
-shadcn components are **vendored**, not depended on:
-
-```bash
-node scripts/vendor-shadcn.mjs    # re-pull from the registry
-```
-
-Files land in `client/components/ui/` and are ordinary source — edit them
-freely. The script only rewrites the `cn` import alias.
+There is no component library. The dashboard is a handful of plain components
+over Tailwind utilities, and React is the only framework dependency in the
+bundle. A new control is a `<button>` with classes on it — reach for a
+dependency only when real behaviour (focus trapping, positioning) demands one,
+and weigh it against the bundle every viewer downloads.
 
 ### Checking the theme
 

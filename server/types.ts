@@ -56,6 +56,12 @@ export interface ServerRoute {
   source: SourceRef;
   /** True when the path contains dynamic segments. */
   dynamic: boolean;
+  /**
+   * False when nothing in the project mounts the router this route belongs to,
+   * so `path` is relative to a prefix that does not exist. The route is listed
+   * as a finding rather than as an endpoint you can call.
+   */
+  mounted: boolean;
   /** Client calls resolved to this route (filled in by the matcher). */
   callers: ClientCall[];
 }
@@ -90,6 +96,7 @@ export interface ScanStats {
   calls: number;
   unmatchedCalls: number;
   uncalledRoutes: number;
+  unmountedRoutes: number;
 }
 
 export interface ScanResult {
@@ -101,6 +108,8 @@ export interface ScanResult {
   unmatchedCalls: ClientCall[];
   /** Server routes nothing in this repo calls (possibly dead, or public API). */
   uncalledRoutes: ServerRoute[];
+  /** Routes on a router nothing mounts, so they answer at no URL at all. */
+  unmountedRoutes: ServerRoute[];
   stats: ScanStats;
   warnings: string[];
 }
@@ -114,6 +123,11 @@ export interface ScanOptions {
   extensions?: string[];
   /** Max files to read before bailing out. Defaults to 20000. */
   maxFiles?: number;
+  /**
+   * Scan test and fixture files too. Off by default: a suite's hardcoded URLs
+   * are neither endpoints the app serves nor requests the app makes.
+   */
+  includeTests?: boolean;
   /** Path prefixes treated as API endpoints for bare string literals. */
   apiPrefixes?: string[];
   /** Extra identifiers to treat as HTTP clients, e.g. `['apiClient']`. */
@@ -142,6 +156,13 @@ export interface RouteLensOptions extends ScanOptions {
    * they hit your app instead of the dashboard's own port.
    */
   target?: string;
+  /**
+   * Where `target` came from, e.g. `BASE_URL in .env`. Shown in the dashboard
+   * so a wrong base path is traceable to the file that stated it.
+   */
+  targetReason?: string;
+  /** Whether something was answering on the target when the scan started. */
+  targetLive?: boolean;
 }
 
 /** A readable file collected by the walker, with its contents. */

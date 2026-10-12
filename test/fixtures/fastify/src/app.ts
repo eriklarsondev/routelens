@@ -2,6 +2,7 @@ import autoload from '@fastify/autoload';
 import Fastify from 'fastify';
 import { join } from 'node:path';
 import healthRoutes from './routes/shared/health.js';
+import statusRoutes from './routes/shared/status.js';
 
 const API_PREFIX = '/api/v2';
 
@@ -15,6 +16,7 @@ export async function build() {
   });
 
   await app.register(healthRoutes, { prefix: API_PREFIX });
+  await app.register(statusRoutes);
 
   app.get('/ping', async () => 'pong');
 

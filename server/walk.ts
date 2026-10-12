@@ -28,6 +28,28 @@ export const DEFAULT_IGNORED_DIRS = [
   'storybook-static',
 ];
 
+/**
+ * Tests are the loudest source of endpoints that do not exist. A suite spins up
+ * a mock app, asserts against hardcoded URLs full of fixture ids, and none of it
+ * is an endpoint the app serves or a call the app makes. Pass
+ * `includeTests: true` to scan them anyway.
+ */
+export const TEST_DIRS = [
+  'test',
+  'tests',
+  '__tests__',
+  '__mocks__',
+  '__snapshots__',
+  '__fixtures__',
+  'fixtures',
+  'e2e',
+  'cypress',
+  'playwright',
+  'spec',
+];
+
+const TEST_FILE = /\.(test|spec)\.[mc]?[jt]sx?$|^conftest\.py$|^test_.*\.py$|_test\.py$/;
+
 export const DEFAULT_EXTENSIONS = [
   '.ts',
   '.tsx',
@@ -51,6 +73,8 @@ export interface WalkOptions {
   ignore?: string[];
   extensions?: string[];
   maxFiles?: number;
+  /** Scan test files too. Off by default — see `TEST_DIRS`. */
+  includeTests?: boolean;
 }
 
 export interface WalkResult {
@@ -66,7 +90,11 @@ export interface WalkResult {
  */
 export function walk(options: WalkOptions): WalkResult {
   const root = options.root;
-  const ignored = new Set([...DEFAULT_IGNORED_DIRS, ...(options.ignore ?? [])]);
+  const ignored = new Set([
+    ...DEFAULT_IGNORED_DIRS,
+    ...(options.includeTests ? [] : TEST_DIRS),
+    ...(options.ignore ?? []),
+  ]);
   const extensions = new Set(options.extensions ?? DEFAULT_EXTENSIONS);
   const maxFiles = options.maxFiles ?? 20_000;
 
@@ -106,6 +134,7 @@ export function walk(options: WalkOptions): WalkResult {
       if (!extensions.has(ext)) continue;
       if (entry.name.endsWith('.d.ts')) continue;
       if (entry.name.endsWith('.min.js')) continue;
+      if (!options.includeTests && TEST_FILE.test(entry.name)) continue;
 
       if (files.length >= maxFiles) {
         truncated = true;
