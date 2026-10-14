@@ -23,12 +23,25 @@ export function toMethod(raw: string | undefined): Method {
 
 /** Collapse slashes, strip query/hash and trailing slash, force a leading slash. */
 export function normalizePath(input: string): string {
-  let path = input.trim();
-  path = path.split('?')[0]!.split('#')[0]!;
+  let path = stripQuery(input.trim()).split('#')[0]!;
   if (!path.startsWith('/')) path = '/' + path;
   path = path.replace(/\/{2,}/g, '/');
   if (path.length > 1) path = path.replace(/\/+$/, '');
   return path === '' ? '/' : path;
+}
+
+/**
+ * Everything before the query string. A `?` that ends a parameter segment —
+ * `/:lang?/about`, `/files/:slug*?` — marks it optional and stays.
+ */
+function stripQuery(path: string): string {
+  for (let i = path.indexOf('?'); i !== -1; i = path.indexOf('?', i + 1)) {
+    const segment = path.slice(path.lastIndexOf('/', i) + 1, i);
+    const next = path[i + 1];
+    if (/^:[\w$]+\*?$/.test(segment) && (next === undefined || next === '/')) continue;
+    return path.slice(0, i);
+  }
+  return path;
 }
 
 export function joinPath(...parts: Array<string | undefined>): string {
@@ -121,7 +134,8 @@ export function parseClientUrl(raw: string): ParsedUrl | null {
   // time we get here a `${BASE}` naming a local string constant has already
   // been substituted, so whatever is left really is unknowable.
   let originUnknown = false;
-  const leadingExpression = /^\$\{[^}]*\}/.exec(value);
+  // The origin may take several pieces: `${proto}://${window.location.host}${base}`.
+  const leadingExpression = /^\$\{[^}]*\}(?:\$\{[^}]*\}|:\/\/)*/.exec(value);
   if (leadingExpression) {
     value = value.slice(leadingExpression[0].length);
     // Just an expression and nothing else — there is no endpoint to report.
@@ -130,7 +144,7 @@ export function parseClientUrl(raw: string): ParsedUrl | null {
     originUnknown = true;
   }
 
-  const absolute = /^(https?:)?\/\/([^/?#]+)(\/[^?#]*)?/i.exec(value);
+  const absolute = /^((?:https?|wss?):)?\/\/([^/?#]+)(\/[^?#]*)?/i.exec(value);
   if (absolute) {
     const host = `${absolute[1] ?? 'https:'}//${absolute[2]}`;
     const path = normalizePath(canonicalizeParams(absolute[3] ?? '/'));
@@ -143,6 +157,13 @@ export function parseClientUrl(raw: string): ParsedUrl | null {
   // Nothing but an expression is left (`fetch(`${base}${path}`)`): the endpoint
   // is decided at runtime, so report it as a wildcard instead of inventing one.
   if (/^\/?\$\{[^}]*\}\/?$/.test(value)) return { path: '/*' };
+
+  // A query string kept in a variable and glued on the end (`/report${qs}`) is
+  // not part of the path; left in, it turns the last segment into a wildcard.
+  value = value.replace(
+    /([^/])\$\{\s*(?:qs|query\w*|search\w*|params|querystring)\b(?:[^{}]|\{[^{}]*\})*\}$/i,
+    '$1',
+  );
 
   return {
     path: normalizePath(canonicalizeParams(value)),
@@ -176,17 +197,27 @@ export function pathMatches(routePath: string, callPath: string): boolean {
   return route.length === call.length;
 }
 
-export function isDynamic(path: string): boolean {
-  return path.split('/').some((segment) => segment.startsWith(':') || segment.includes('*'));
+/**
+ * `pathMatches` for client routes, where a trailing `*` takes the rest of the
+ * path however deep it goes — `/docs/*` serves `/docs/guides/setup`. Server
+ * matching keeps `*` to one segment: a server's catch-all usually hands back
+ * the app shell, which is not what an API request was after.
+ */
+export function pageMatches(pagePath: string, linkPath: string): boolean {
+  // An optional segment (`/:lang?/about`) matches with it and without it.
+  const optional = pagePath.split('/').findIndex((segment) => /^:[\w$]+\?$/.test(segment));
+  if (optional !== -1) {
+    const segments = pagePath.split('/');
+    const present = segments.map((segment, index) => (index === optional ? segment.slice(0, -1) : segment));
+    const absent = segments.filter((_, index) => index !== optional);
+    return pageMatches(present.join('/'), linkPath) || pageMatches(absent.join('/') || '/', linkPath);
+  }
+
+  const splat = pagePath.endsWith('/*') ? pagePath.slice(0, -2) : null;
+  if (splat === null) return pathMatches(pagePath, linkPath);
+  return pathMatches(`${splat}/:rest*`, linkPath);
 }
 
-/** Replace `:param` segments with a sample value so a path is clickable. */
-export function fillParams(path: string, value = '1'): string {
-  return path
-    .split('/')
-    .map((segment) => {
-      if (!segment.startsWith(':')) return segment;
-      return value;
-    })
-    .join('/');
+export function isDynamic(path: string): boolean {
+  return path.split('/').some((segment) => segment.startsWith(':') || segment.includes('*'));
 }

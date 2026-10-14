@@ -1,30 +1,61 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createLens, type Lens } from './core.js';
+import { respondTo } from './fetch-handler.js';
 import type { RouteLensOptions } from './types.js';
 
 export type NextFunction = (error?: unknown) => void;
 
+/** Koa's context, as far as routelens needs it. */
+interface KoaContext {
+  req: IncomingMessage;
+  res: ServerResponse;
+  respond?: boolean;
+  request?: { body?: unknown };
+}
+
+/** Hono's context, as far as routelens needs it. */
+interface HonoContext {
+  req: { raw: Request };
+}
+
+/** A Fastify instance, as far as routelens needs it. */
+interface FastifyInstance {
+  addHook(name: string, hook: (...args: any[]) => unknown): unknown;
+}
+
 export interface RouteLensMiddleware {
-  (request: IncomingMessage, response: ServerResponse, next: NextFunction): void;
+  /**
+   * Express, Connect, NestJS and Vite call it as `(request, response, next)`;
+   * Koa and Hono as `(context, next)`; Fastify registers it as a plugin,
+   * `(instance, options, done)`. One loose signature rather than one overload
+   * each, because TypeScript infers a framework's generics from the last
+   * overload only, and every framework but one would get the wrong ones.
+   */
+  (first: unknown, second?: unknown, third?: unknown): any;
   lens: Lens;
   close(): void;
 }
 
 /**
- * Connect / Express / Vite style middleware. Mount it on your dev server and
- * open `/__routelens`:
+ * The dashboard as middleware, one initializer for every Node framework. Mount
+ * it on your dev server and open `/__routelens`:
  *
  * ```js
  * if (process.env.NODE_ENV !== 'production') {
  *   const { routelens } = await import('routelens');
- *   app.use(routelens());
+ *   app.use(routelens());         // Express, Connect, Koa, Hono
+ *   // fastify.register(routelens());
  * }
  * ```
+ *
+ * Each framework calls middleware with arguments of its own shape, which is how
+ * this tells them apart.
  */
 export function routelens(options: RouteLensOptions = {}): RouteLensMiddleware {
   const lens = createLens(options);
+  const owns = (path: string) => path.startsWith(lens.basePath) || lens.isEventStream(path);
 
-  const middleware = ((request, response, next) => {
+  const connect = (request: IncomingMessage, response: ServerResponse, next: NextFunction): void => {
     const url = request.url ?? '/';
     const questionMark = url.indexOf('?');
     const path = questionMark === -1 ? url : url.slice(0, questionMark);
@@ -51,11 +82,85 @@ export function routelens(options: RouteLensOptions = {}): RouteLensMiddleware {
         response.end(request.method === 'HEAD' ? undefined : result.body);
       })
       .catch(next);
-  }) as RouteLensMiddleware;
+  };
 
+  // Koa writes the response itself once the middleware chain settles, unless
+  // told not to; the chain settles when routelens has finished answering.
+  const koa = (ctx: KoaContext, next: () => Promise<unknown>): Promise<unknown> => {
+    if (!owns(pathOf(ctx.req.url))) return next();
+    const parsed = ctx.request?.body;
+    if (parsed !== undefined) (ctx.req as IncomingMessage & { body?: unknown }).body = parsed;
+    ctx.respond = false;
+    return new Promise((resolve, reject) => {
+      ctx.res.once('finish', resolve).once('close', resolve);
+      connect(ctx.req, ctx.res, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        ctx.respond = true;
+        resolve(next());
+      });
+    });
+  };
+
+  // A Response returned from Hono middleware is the answer; `next()` is the app.
+  const hono = async (c: HonoContext, next: () => Promise<unknown>): Promise<unknown> => {
+    if (!owns(new URL(c.req.raw.url).pathname)) return next();
+    return (await respondTo(lens, c.req.raw)) ?? next();
+  };
+
+  // Fastify only routes what it has a route for, so routelens answers in a
+  // hook, before routing, rather than as a route of its own.
+  const fastify = (instance: FastifyInstance, done: (error?: Error) => void): void => {
+    type FastifyRequest = { raw: IncomingMessage };
+    type FastifyReply = { raw: ServerResponse; hijack(): void };
+    instance.addHook('onRequest', (request: FastifyRequest, reply: FastifyReply, hookDone: NextFunction) => {
+      if (!owns(pathOf(request.raw.url))) {
+        hookDone();
+        return;
+      }
+      // Answered here, so the hook chain is never resumed: that is how a
+      // Fastify hook responds early.
+      reply.hijack();
+      connect(request.raw, reply.raw, () => {
+        reply.raw.writeHead(404, { 'content-type': 'application/json' });
+        reply.raw.end(JSON.stringify({ error: 'Not a routelens path' }));
+      });
+    });
+    instance.addHook('onClose', (_instance: unknown, closed: () => void) => {
+      lens.close();
+      closed();
+    });
+    done();
+  };
+
+  const middleware = function (first: any, second: any, third: any): unknown {
+    if (typeof first?.addHook === 'function' && typeof third === 'function') return fastify(first, third);
+    if (typeof first?.on === 'function' && typeof second?.writeHead === 'function') return connect(first, second, third);
+    if (typeof Request === 'function' && first?.req?.raw instanceof Request) return hono(first, second);
+    if (typeof first?.req?.on === 'function' && typeof first?.res?.writeHead === 'function') return koa(first, second);
+    throw new TypeError(
+      'routelens(): called the way none of Express, Koa, Hono or Fastify call middleware. ' +
+        'Use app.use(routelens()), or app.register(routelens()) in Fastify.',
+    );
+  } as RouteLensMiddleware;
+
+  // Fastify scopes a plugin's hooks to the plugin unless it opts out, and a
+  // dashboard that only covered its own (nonexistent) routes would never answer.
+  Object.assign(middleware, {
+    [Symbol.for('skip-override')]: true,
+    [Symbol.for('fastify.display-name')]: 'routelens',
+  });
   middleware.lens = lens;
   middleware.close = () => lens.close();
   return middleware;
+}
+
+function pathOf(url: string | undefined): string {
+  const value = url ?? '/';
+  const questionMark = value.indexOf('?');
+  return questionMark === -1 ? value : value.slice(0, questionMark);
 }
 
 function streamEvents(lens: Lens, request: IncomingMessage, response: ServerResponse): void {

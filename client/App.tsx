@@ -198,6 +198,7 @@ export function App() {
         <div className="min-h-0 overflow-y-auto">
           <EndpointList
             data={data}
+            tab={tab}
             groups={groups}
             empty={entries.length === 0}
             selectedId={selectedId}

@@ -1,0 +1,7 @@
+{
+  "name": "astro-guards",
+  "private": true,
+  "dependencies": {
+    "astro": "^4.10.0"
+  }
+}

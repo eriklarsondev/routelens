@@ -1,0 +1,7 @@
+{
+  "name": "svelte-app",
+  "private": true,
+  "devDependencies": {
+    "@sveltejs/kit": "^2.5.0"
+  }
+}

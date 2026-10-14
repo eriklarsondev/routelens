@@ -26,7 +26,11 @@ test('ignores commented-out handlers', () => {
 });
 
 test('finds Next.js pages and Pages API methods', () => {
-  assert.ok(has('GET', '/'), 'app/page.tsx');
+  assert.ok(
+    result.pages.some((page) => page.path === '/' && page.source.file === 'app/page.tsx'),
+    'app/page.tsx is a client page',
+  );
+  assert.equal(has('GET', '/'), false, 'and not a server route');
   assert.ok(has('GET', '/api/legacy'), 'pages/api/legacy GET');
   assert.ok(has('PUT', '/api/legacy'), 'pages/api/legacy PUT');
 });
@@ -139,8 +143,6 @@ test('summarizes the scan', () => {
 
 test('respects includePages: false', () => {
   const apiOnly = scan({ root, includePages: false });
-  assert.equal(
-    apiOnly.routes.some((route) => route.kind === 'page'),
-    false,
-  );
+  assert.deepEqual(apiOnly.pages, []);
+  assert.equal(apiOnly.routes.length, result.routes.length, 'server routes are unaffected');
 });

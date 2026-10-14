@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Copy, ExternalLink, FileCode, Terminal } from '@/components/icons';
+import { CopyButton } from '@/components/CopyButton';
+import { Copy, ExternalLink, FileCode, Terminal } from '@/components/icons';
 import { MethodBadge, PathText } from '@/components/MethodBadge';
+import { MiddlewareStep } from '@/components/MiddlewareStep';
+import { Tip } from '@/components/ui/tooltip';
 import { openInEditor } from '@/api';
-import { cn, CONTROL } from '@/lib/utils';
+import { cn, CONTROL, INPUT } from '@/lib/utils';
 import {
+  appOf,
+  gatesOf,
   callsOf,
   curlFor,
   fillPath,
@@ -13,8 +18,8 @@ import {
   routeById,
   shortSource,
 } from '@/lib';
-import type { DashboardData, Entry } from '@/types';
-import { isRoute } from '@/types';
+import type { ClientPage, DashboardData, Entry, PageUnlock, ServerRoute } from '@/types';
+import { isCall, isLink, isPage, isRoute } from '@/types';
 
 const SHORTCUTS: Array<[string, string]> = [
   ['/', 'filter'],
@@ -42,7 +47,7 @@ export function DetailPanel({ entry, data }: DetailPanelProps) {
   if (!entry || !data) {
     return (
       <aside className="bg-card text-muted-foreground flex h-full flex-col gap-4 border-l p-6 text-sm">
-        <p>Select an endpoint to get its URL, curl command, callers and source.</p>
+        <p>Select an endpoint or page to get its URL, callers and source.</p>
         <dl className="grid gap-1 font-mono text-xs">
           {SHORTCUTS.map(([keys, label]) => (
             <div key={keys} className="flex gap-3">
@@ -57,7 +62,8 @@ export function DetailPanel({ entry, data }: DetailPanelProps) {
 
   const url = originFor(entry, data) + fillPath(entry.path, values);
   const callers = callsOf(entry);
-  const handler = routeById(data, !isRoute(entry) ? entry.routeId : undefined);
+  const handler = routeById(data, isCall(entry) ? entry.routeId : undefined);
+  const app = isPage(entry) || isLink(entry) ? appOf(data, entry.app) : null;
 
   return (
     <aside className="bg-card flex h-full flex-col gap-5 overflow-y-auto border-l p-4">
@@ -66,7 +72,7 @@ export function DetailPanel({ entry, data }: DetailPanelProps) {
           <MethodBadge method={entry.method} />
           <PathText
             path={entry.path}
-            host={!isRoute(entry) ? entry.host : undefined}
+            host={isCall(entry) ? entry.host : undefined}
             className="text-sm break-all"
           />
         </div>
@@ -75,9 +81,48 @@ export function DetailPanel({ entry, data }: DetailPanelProps) {
           {isRoute(entry) && entry.framework !== 'unknown' ? (
             <span className="shrink-0">· {entry.framework}</span>
           ) : null}
-          {!isRoute(entry) ? <span className="shrink-0">· {entry.library}</span> : null}
+          {isCall(entry) ? <span className="shrink-0">· {entry.via ?? entry.library}</span> : null}
+          {isPage(entry) ? <span className="shrink-0">· {entry.router}</span> : null}
+          {isLink(entry) ? <span className="shrink-0">· {entry.via}</span> : null}
         </div>
       </div>
+
+      {isLink(entry) && entry.issue ? (
+        <p className="text-method-put border-method-put/30 bg-method-put/10 rounded-md border px-2.5 py-2 text-xs leading-relaxed">
+          No page in {entry.app === '.' ? 'this app' : entry.app} answers this path, so the link
+          lands on its not-found page — or, with a catch-all redirect, somewhere it did not mean
+          to go.
+        </p>
+      ) : null}
+
+      {isPage(entry) && entry.to ? (
+        <Field label="Redirects to">
+          <PathText path={entry.to} className="text-sm break-all" />
+        </Field>
+      ) : null}
+
+      {isPage(entry) && entry.condition ? (
+        <Field label="Only when">
+          <code className="bg-muted/60 block rounded px-2 py-1 font-mono text-[11px] break-all">
+            {entry.condition}
+          </code>
+        </Field>
+      ) : null}
+
+      {app ? (
+        <Field label="App">
+          <p className="font-mono text-[11px]">
+            {app.root === '.' ? (app.name ?? '/') : app.root}
+            <span className="text-muted-foreground"> · served under </span>
+            {app.base ?? '?'}
+          </p>
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            {app.base
+              ? `From ${app.baseSource ?? 'the default'}.`
+              : 'routelens could not work out the base path this app is served under, so the URL below assumes /.'}
+          </p>
+        </Field>
+      ) : null}
 
       {/* Above the URL, because it is the reason the URL below is a guess. */}
       {isRoute(entry) && !entry.mounted ? (
@@ -103,7 +148,7 @@ export function DetailPanel({ entry, data }: DetailPanelProps) {
                   onChange={(event) =>
                     setValues((prev) => ({ ...prev, [param]: event.target.value }))
                   }
-                  className="border-border bg-muted/40 placeholder:text-muted-foreground/50 focus:ring-ring/40 w-full rounded-md border px-2 py-1.5 font-mono text-xs focus:ring-2 focus:outline-none"
+                  className={cn(INPUT, 'w-full')}
                 />
               </label>
             ))}
@@ -114,9 +159,9 @@ export function DetailPanel({ entry, data }: DetailPanelProps) {
       <Field label="URL">
         {/* One line, clipped at the end. The full value is a hover away, and
             the copy button next to it never truncates. */}
-        <p className="text-muted-foreground min-w-0 truncate font-mono text-[11px]" title={url}>
-          {url}
-        </p>
+        <Tip content={url} align="start" mono>
+          <p className="text-muted-foreground min-w-0 truncate font-mono text-[11px]">{url}</p>
+        </Tip>
         <div className="flex flex-wrap gap-2 pt-1">
           {isNavigable(entry) ? (
             <a
@@ -134,16 +179,35 @@ export function DetailPanel({ entry, data }: DetailPanelProps) {
             </a>
           ) : null}
           <CopyButton value={url} label="Copy URL" icon={Copy} />
-          <CopyButton value={curlFor(entry, url)} label="Copy curl" icon={Terminal} />
+          {/* A page is for a browser; curl would only fetch the app shell. */}
+          {isPage(entry) || isLink(entry) ? null : (
+            <CopyButton value={curlFor(entry, url)} label="Copy curl" icon={Terminal} />
+          )}
         </div>
-        {/* Only about the method: an unmounted route says its own piece above. */}
-        {!isNavigable(entry) && (!isRoute(entry) || entry.mounted) ? (
+        {isPage(entry) && !isNavigable(entry) ? (
           <p className="text-muted-foreground text-xs leading-relaxed">
-            {entry.method} endpoints are not opened from here — routelens never sends requests.
-            Copy the curl instead.
+            A catch-all answers every path it covers, so there is no one URL to open.
           </p>
         ) : null}
       </Field>
+
+      {isPage(entry) && !entry.public ? <Unlocks page={entry} data={data} /> : null}
+
+      {isRoute(entry) && entry.middleware.length > 0 ? (
+        <Field label={`Runs before the handler (${entry.middleware.length})`}>
+          {entry.middleware.map((item, index) => (
+            <MiddlewareStep key={`${item.name}:${item.source.file}:${item.source.line}:${index}`} item={item} />
+          ))}
+        </Field>
+      ) : null}
+
+      {isRoute(entry) && gatesOf(entry).length === 0 ? (
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          No authentication or permission check found in front of this endpoint, or inside its
+          handler.
+        </p>
+      ) : null}
+
 
       {handler ? (
         <Field label="Handled by">
@@ -164,16 +228,80 @@ export function DetailPanel({ entry, data }: DetailPanelProps) {
               file={caller.source.file}
               line={caller.source.line}
               method={caller.method}
-              text={caller.library}
+              text={caller.via ?? caller.library}
             />
           ))}
         </Field>
       ) : null}
 
-      {isRoute(entry) && entry.mounted && entry.kind === 'api' && callers.length === 0 ? (
+      {isPage(entry) && entry.linkedFrom.length > 0 ? (
+        <Field label={`Linked from (${entry.linkedFrom.length})`}>
+          {entry.linkedFrom.map((link) => (
+            <Reference
+              key={link.id}
+              file={link.source.file}
+              line={link.source.line}
+              method="LINK"
+              text={link.via}
+            />
+          ))}
+        </Field>
+      ) : null}
+
+      {isPage(entry) && entry.kind === 'page' && entry.linkedFrom.length === 0 ? (
+        <p className="text-muted-foreground text-xs">Nothing in this app links here.</p>
+      ) : null}
+
+      {isRoute(entry) && entry.mounted && callers.length === 0 ? (
         <p className="text-muted-foreground text-xs">Nothing in this repo calls this endpoint.</p>
       ) : null}
     </aside>
+  );
+}
+
+const UNLOCKS: Array<{ by: PageUnlock['by']; note: string }> = [
+  { by: 'sign-in', note: 'Signing in here gets a visitor past the check in front of this page.' },
+  { by: 'link', note: 'The page sends the token from its link here.' },
+];
+
+/**
+ * What a page that is not public needs hit before it opens: the endpoint that
+ * signs a visitor in, or the one its link's token is checked against. How the
+ * page is guarded stays on the server's side; this is only where to go.
+ */
+function Unlocks({ page, data }: { page: ClientPage; data: DashboardData }) {
+  const groups = UNLOCKS.map(({ by, note }) => ({
+    by,
+    note,
+    routes: (page.unlockedBy ?? [])
+      .filter((unlock) => unlock.by === by)
+      .map((unlock) => routeById(data, unlock.routeId))
+      .filter((route): route is ServerRoute => route !== null),
+  })).filter((group) => group.routes.length > 0);
+
+  return (
+    <Field label="To get past the lock">
+      {groups.length === 0 ? (
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          routelens could not tell which endpoint opens this page.
+        </p>
+      ) : (
+        groups.map((group) => (
+          <div key={group.by} className="space-y-1">
+            <p className="text-muted-foreground text-xs leading-relaxed">{group.note}</p>
+            {group.routes.map((route) => (
+              <Reference
+                key={route.id}
+                file={route.source.file}
+                line={route.source.line}
+                method={route.method}
+                text={route.path}
+              />
+            ))}
+          </div>
+        ))
+      )}
+    </Field>
   );
 }
 
@@ -188,50 +316,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function CopyButton({
-  value,
-  label,
-  icon: Glyph,
-}: {
-  value: string;
-  label: string;
-  icon: typeof Copy;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  return (
-    <button
-      type="button"
-      className={CONTROL}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(value);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
-        } catch {
-          // Clipboard access can be denied; the URL is on screen either way.
-        }
-      }}
-    >
-      {copied ? <Check className="text-method-get" /> : <Glyph />}
-      {/* Fixed width so confirming the copy does not resize the button. */}
-      <span className="w-14 text-center">{copied ? 'Copied' : label}</span>
-    </button>
-  );
-}
-
 function SourceLink({ file, line }: { file: string; line: number }) {
   return (
-    <button
-      className="hover:text-foreground flex min-w-0 items-center gap-1 underline-offset-2 hover:underline"
-      onClick={() => void openInEditor(file, line)}
-      title={`${file}:${line}`}
-    >
-      <FileCode className="size-3 shrink-0" />
-      {/* Shortened from the front: the filename and line are the half worth
-          reading, and a deep path would otherwise push them out of sight. */}
-      <span className="truncate">{shortSource(file, line, 44)}</span>
-    </button>
+    <Tip content={`${file}:${line}`} align="start" mono>
+      <button
+        className="hover:text-foreground flex min-w-0 items-center gap-1 underline-offset-2 hover:underline"
+        onClick={() => void openInEditor(file, line)}
+      >
+        <FileCode className="size-3 shrink-0" />
+        {/* Shortened from the front: the filename and line are the half worth
+            reading, and a deep path would otherwise push them out of sight. */}
+        <span className="truncate">{shortSource(file, line, 44)}</span>
+      </button>
+    </Tip>
   );
 }
 
@@ -247,16 +344,17 @@ function Reference({
   text: string;
 }) {
   return (
-    <button
-      onClick={() => void openInEditor(file, line)}
-      title={`${file}:${line}`}
-      className="hover:bg-accent flex w-full items-center gap-2 rounded px-1 py-1 text-left"
-    >
-      <MethodBadge method={method as never} />
-      <span className="truncate font-mono text-[11px]">{text}</span>
-      <span className="text-muted-foreground ml-auto max-w-[45%] truncate font-mono text-[10px]">
-        {shortSource(file, line, 26)}
-      </span>
-    </button>
+    <Tip content={`${file}:${line}`} side="left" mono>
+      <button
+        onClick={() => void openInEditor(file, line)}
+        className="hover:bg-accent flex w-full items-center gap-2 rounded px-1 py-1 text-left"
+      >
+        <MethodBadge method={method as never} />
+        <span className="truncate font-mono text-[11px]">{text}</span>
+        <span className="text-muted-foreground ml-auto max-w-[45%] truncate font-mono text-[10px]">
+          {shortSource(file, line, 26)}
+        </span>
+      </button>
+    </Tip>
   );
 }

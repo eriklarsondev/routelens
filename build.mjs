@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { build } from 'esbuild';
-import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, join, resolve } from 'node:path';
 import { compile } from 'tailwindcss';
@@ -34,12 +34,6 @@ const result = await build({
   loader: { '.css': 'empty' },
   metafile: true,
 });
-
-try {
-  chmodSync('dist/server/cli.js', 0o755);
-} catch {
-  // The server build runs separately; ignore when it has not run yet.
-}
 
 // ----------------------------------------------------------------------- CSS
 

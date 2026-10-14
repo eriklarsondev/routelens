@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Refresh } from '@/components/icons';
 import { ThemeToggle } from '@/components/theme';
-import { cn, CONTROL } from '@/lib/utils';
+import { Tip } from '@/components/ui/tooltip';
+import { cn, CONTROL, INPUT } from '@/lib/utils';
 import type { DashboardData, TabKey } from '@/types';
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'server', label: 'Server' },
   { key: 'client', label: 'Client' },
-  { key: 'pages', label: 'Pages' },
   { key: 'issues', label: 'Issues' },
 ];
 
@@ -48,12 +48,12 @@ export function TopBar({
 
   const counts: Record<TabKey, number> = {
     server: data?.stats.routes ?? 0,
-    client: data?.stats.calls ?? 0,
-    pages: data?.stats.pages ?? 0,
+    client: (data?.stats.pages ?? 0) + (data?.stats.redirects ?? 0),
     issues:
       (data?.stats.unmatchedCalls ?? 0) +
       (data?.stats.uncalledRoutes ?? 0) +
-      (data?.stats.unmountedRoutes ?? 0),
+      (data?.stats.unmountedRoutes ?? 0) +
+      (data?.stats.brokenLinks ?? 0),
   };
 
   return (
@@ -94,21 +94,16 @@ export function TopBar({
             event.currentTarget.blur();
           }
         }}
-        className="placeholder:text-muted-foreground/70 min-w-48 flex-1 border-b bg-transparent py-1 font-mono text-[13px] focus:outline-none"
+        className={cn(INPUT, 'min-w-48 flex-1')}
       />
 
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onRescan}
-          disabled={scanning}
-          title="Rescan the project"
-          className={CONTROL}
-        >
-          <Refresh className={cn(scanning && 'animate-spin')} />
-          {/* Fixed width: "Scanning…" is wider, and the button must not jump. */}
-          <span className="w-14 text-center">{scanning ? 'Scanning…' : 'Rescan'}</span>
-        </button>
+        <Tip content="Rescan the project">
+          <button type="button" onClick={onRescan} disabled={scanning} className={CONTROL}>
+            <Refresh className={cn(scanning && 'animate-spin')} />
+            <span>{scanning ? 'Scanning…' : 'Rescan'}</span>
+          </button>
+        </Tip>
         <ThemeToggle />
       </div>
     </header>

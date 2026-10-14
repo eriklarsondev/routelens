@@ -30,6 +30,23 @@ export function ChevronRight({ className }: { className?: string }) {
   );
 }
 
+export function Lock({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </Icon>
+  );
+}
+
+export function Shield({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" />
+    </Icon>
+  );
+}
+
 export function Refresh({ className }: { className?: string }) {
   return (
     <Icon className={className}>

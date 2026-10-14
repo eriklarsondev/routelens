@@ -161,12 +161,3 @@ export function walk(options: WalkOptions): WalkResult {
 
   return { files, truncated };
 }
-
-/** 1-indexed line number for a character offset. */
-export function lineAt(text: string, index: number): number {
-  let line = 1;
-  for (let i = 0; i < index && i < text.length; i++) {
-    if (text.charCodeAt(i) === 10) line++;
-  }
-  return line;
-}

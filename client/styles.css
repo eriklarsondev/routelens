@@ -30,6 +30,13 @@
   --method-realtime: oklch(0.52 0.19 300);
   --method-other: oklch(0.552 0.016 285.938);
   --param: oklch(0.52 0.19 300);
+
+  /* Code examples, in the same hues as the methods so they sit with the rest. */
+  --syntax-keyword: oklch(0.52 0.19 300);
+  --syntax-string: oklch(0.5 0.13 150);
+  --syntax-function: oklch(0.52 0.17 255);
+  --syntax-property: oklch(0.5 0.12 60);
+  --syntax-variable: oklch(0.55 0.2 15);
 }
 
 .dark {
@@ -51,6 +58,12 @@
   --method-realtime: oklch(0.78 0.15 300);
   --method-other: oklch(0.705 0.015 286.067);
   --param: oklch(0.8 0.14 300);
+
+  --syntax-keyword: oklch(0.78 0.15 300);
+  --syntax-string: oklch(0.8 0.15 150);
+  --syntax-function: oklch(0.78 0.13 235);
+  --syntax-property: oklch(0.83 0.13 75);
+  --syntax-variable: oklch(0.75 0.16 15);
 }
 
 @theme inline {
@@ -72,6 +85,11 @@
   --color-method-realtime: var(--method-realtime);
   --color-method-other: var(--method-other);
   --color-param: var(--param);
+  --color-syntax-keyword: var(--syntax-keyword);
+  --color-syntax-string: var(--syntax-string);
+  --color-syntax-function: var(--syntax-function);
+  --color-syntax-property: var(--syntax-property);
+  --color-syntax-variable: var(--syntax-variable);
 
   --radius-sm: calc(var(--radius) * 0.75);
 
@@ -118,5 +136,27 @@
 
   ::-webkit-scrollbar-track {
     background: transparent;
+  }
+}
+
+/*
+ * Tooltips fade and grow in from the side they open on, as shadcn's do. Its
+ * own classes come from tw-animate-css; two keyframes are all this needs.
+ */
+[data-slot='tooltip-content'][data-state='delayed-open'],
+[data-slot='tooltip-content'][data-state='instant-open'] {
+  animation: tooltip-in 120ms ease-out;
+}
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot='tooltip-content'] {
+    animation: none !important;
   }
 }

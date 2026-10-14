@@ -14,3 +14,10 @@ export const CONTROL = cn(
   'hover:bg-accent hover:text-foreground',
   'disabled:pointer-events-none disabled:opacity-60',
 );
+
+/** Chrome for text fields: the filter in the top bar and the parameter values. */
+export const INPUT = cn(
+  'rounded-md border px-2 py-1.5 font-mono text-xs',
+  'border-border bg-muted/40 placeholder:text-muted-foreground/50',
+  'focus:ring-ring/40 focus:ring-2 focus:outline-none',
+);

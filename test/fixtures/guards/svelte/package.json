@@ -1,0 +1,7 @@
+{
+  "name": "svelte-guards",
+  "private": true,
+  "dependencies": {
+    "@sveltejs/kit": "^2.5.0"
+  }
+}

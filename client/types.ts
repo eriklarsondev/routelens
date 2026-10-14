@@ -1,7 +1,30 @@
-import type { ClientCall, Method, ScanResult, ServerRoute } from '../server/types.js';
+import type {
+  ClientApp,
+  ClientCall,
+  ClientLink,
+  ClientPage,
+  Method as HttpMethod,
+  PageUnlock,
+  ScanResult,
+  ServerRoute,
+} from '../server/types.js';
 
-export type { ClientCall, ScanResult, ServerRoute };
-export type { Framework, Method, ClientLibrary, SourceRef } from '../server/types.js';
+export type { ClientApp, ClientCall, ClientLink, ClientPage, PageUnlock, ScanResult, ServerRoute };
+export type {
+  Framework,
+  ClientLibrary,
+  ClientRouter,
+  MiddlewareKind,
+  MiddlewareRef,
+  SourceRef,
+} from '../server/types.js';
+
+/**
+ * What a row is tagged with, and what each card's switches filter by: the HTTP
+ * method of an endpoint or call, PAGE / REDIRECT for a client URL, or LINK for
+ * a link that lands nowhere.
+ */
+export type Method = HttpMethod | 'PAGE' | 'REDIRECT' | 'LINK';
 
 /** What `GET <basePath>/data` returns: a scan plus how the dashboard is mounted. */
 export interface DashboardData extends ScanResult {
@@ -14,13 +37,31 @@ export interface DashboardData extends ScanResult {
   mode: 'standalone' | 'mounted';
 }
 
-export type TabKey = 'server' | 'client' | 'pages' | 'issues';
+export type TabKey = 'server' | 'client' | 'issues';
 
-/** A row in the list: either side of the map, plus an optional issue note. */
-export type Entry = (ServerRoute | ClientCall) & { issue?: string };
+/** A client page as a row: tagged like the other rows so cards can filter it. */
+export type PageEntry = ClientPage & { method: 'PAGE' | 'REDIRECT' };
+
+/** A broken link as a row on the Issues tab. */
+export type LinkEntry = ClientLink & { method: 'LINK' };
+
+/** A row in the list: an endpoint, a call, a page or a link, plus an optional issue note. */
+export type Entry = (ServerRoute | ClientCall | PageEntry | LinkEntry) & { issue?: string };
 
 export function isRoute(entry: Entry): entry is ServerRoute & { issue?: string } {
-  return 'kind' in entry;
+  return 'callers' in entry;
+}
+
+export function isCall(entry: Entry): entry is ClientCall & { issue?: string } {
+  return 'library' in entry;
+}
+
+export function isPage(entry: Entry): entry is PageEntry & { issue?: string } {
+  return 'router' in entry;
+}
+
+export function isLink(entry: Entry): entry is LinkEntry & { issue?: string } {
+  return 'kind' in entry && entry.kind === 'link';
 }
 
 /**

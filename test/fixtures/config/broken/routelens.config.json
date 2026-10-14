@@ -1,0 +1,5 @@
+{
+  "middlware": { "auth": ["x"] },
+  "ignore": "dist",
+  "middleware": { "admin": ["y"], "permission": ["bouncer"] }
+}

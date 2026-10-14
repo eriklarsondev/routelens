@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [18, 20, 22, 24]
+        include:
+          - os: macos-latest
+            node: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  package:
+    name: Packed tarball works when installed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm pack
+      - name: Install it into a fresh project and use every entry point
+        run: |
+          mkdir ../smoke && cd ../smoke
+          npm init -y > /dev/null
+          npm install --save-dev "$GITHUB_WORKSPACE"/routelens-*.tgz
+          npx routelens --version
+          npx routelens list "$GITHUB_WORKSPACE/test/fixtures/demo" > /dev/null
+          node --input-type=module -e "
+            import { scan } from 'routelens/scan';
+            const result = scan({ root: '$GITHUB_WORKSPACE/test/fixtures/spa' });
+            if (result.routes.length + result.pages.length === 0) process.exit(1);
+            console.log(result.stats);
+          "
+          node --input-type=module -e "
+            import { routelens } from 'routelens';
+            import { createRouteLensHandler } from 'routelens/fetch';
+            import { routelensVite } from 'routelens/vite';
+            import { planWiring } from 'routelens/wire';
+            for (const fn of [routelens, createRouteLensHandler, routelensVite, planWiring]) {
+              if (typeof fn !== 'function') process.exit(1);
+            }
+          "
+          node -r routelens/auto -e "process.exit(0)"
+          node --import routelens/auto -e "process.exit(0)"

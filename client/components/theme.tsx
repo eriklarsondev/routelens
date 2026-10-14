@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Monitor, Moon, Sun } from '@/components/icons';
+import { Tip } from '@/components/ui/tooltip';
 import { CONTROL } from '@/lib/utils';
 
 export type Theme = 'light' | 'dark' | 'system';
@@ -59,15 +60,11 @@ export function ThemeToggle() {
   const Glyph = ICON[context.theme];
 
   return (
-    <button
-      type="button"
-      onClick={context.cycle}
-      title="Switch theme"
-      className={CONTROL}
-    >
-      <Glyph />
-      {/* A fixed width so cycling the label does not resize the button. */}
-      <span className="w-10 text-center capitalize">{context.theme}</span>
-    </button>
+    <Tip content="Switch theme">
+      <button type="button" onClick={context.cycle} className={CONTROL}>
+        <Glyph />
+        <span className="capitalize">{context.theme}</span>
+      </button>
+    </Tip>
   );
 }

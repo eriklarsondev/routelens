@@ -1,0 +1,8 @@
+{
+  "name": "config-in-package",
+  "private": true,
+  "routelens": {
+    "autoMount": false,
+    "middleware": { "auth": ["whoami"] }
+  }
+}

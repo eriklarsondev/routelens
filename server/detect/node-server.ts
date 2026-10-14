@@ -1,8 +1,10 @@
 import { posix } from 'node:path';
 import { canonicalizeParams, joinPath, normalizePath, toMethod } from '../paths.js';
-import type { Framework, Method, ScannedFile } from '../types.js';
+import type { Framework, Method, MiddlewareRef, ScannedFile, SourceRef } from '../types.js';
+import { describeArgument, handlerChecks, middlewareRef } from './middleware.js';
 import type { ModuleResolver } from './resolve.js';
 import { CLIENT_IDENTIFIERS, lineOf, looksLikeRouter, type RawRoute } from './shared.js';
+import { callArguments, closeOf, endOfQuoted, endOfTemplate, objectProperties } from './syntax.js';
 
 const VERBS = 'get|post|put|patch|delete|del|head|options|all|any';
 const CLIENT_SET = new Set(CLIENT_IDENTIFIERS);
@@ -12,11 +14,32 @@ interface RouteHit {
   method: Method;
   path: string;
   line: number;
+  /** Where it was registered: a `use()` before it in the file applies to it, one after does not. */
+  offset: number;
+  /** Middleware passed to the route itself, and checks its handler makes. */
+  middleware: MiddlewareRef[];
 }
 
 interface MountHit {
   prefix: string;
   ident: string;
+  /** The router or app it was mounted on, whose own prefix it sits under. */
+  on?: string;
+  offset: number;
+  /** The call that mounted it, whose other arguments run in front of it. */
+  use?: UseCall;
+}
+
+/**
+ * A `use()` call, or Fastify's `addHook()`: middleware for what is registered
+ * on the same router after it, under `prefix` when it names one. Its arguments
+ * include any routers it mounts, which are told apart once imports resolve.
+ */
+interface UseCall {
+  on: string;
+  offset: number;
+  prefix: string | null;
+  args: Array<{ name: string; ident?: string; line: number }>;
 }
 
 /** `register(autoload, { dir, options: { prefix } })`: a whole directory mounted at once. */
@@ -45,6 +68,11 @@ export interface NodeServerAnalysis {
   isEntry: boolean;
   /** `new Hono().basePath('/api')` and friends: applies to the whole file. */
   basePath?: string;
+  /** Koa's `new Router({ prefix: '/api' })`: applies to that router's routes and mounts. */
+  routerPrefixes: Map<string, string>;
+  uses: UseCall[];
+  /** Whole applications built in this file, as opposed to routers. */
+  apps: Set<string>;
 }
 
 /**
@@ -60,55 +88,52 @@ export function analyzeNodeServer(file: ScannedFile, masked: string): NodeServer
   const routes: RouteHit[] = [];
   const mounts: MountHit[] = [];
   const dirMounts: DirMountHit[] = [];
+  const uses: UseCall[] = [];
   const localRouters = collectLocalRouters(masked);
   const imports = collectImports(masked);
   const constants = collectStringConstants(masked);
   const isRouter = (ident: string) => localRouters.has(ident) || looksLikeRouter(ident);
 
-  // <ident>.<verb>('<path>' [, rest...
+  const describe = (args: Array<{ text: string; start: number }>) =>
+    args.flatMap((arg) =>
+      describeArgument(arg.text).map((described) => ({ ...described, line: lineOf(masked, arg.start) })),
+    );
+
+  // A `use()` call's arguments are middleware, routers, or both. Only a known
+  // router mounts — `app.use(requireAuth)` is middleware, and an imported
+  // middleware module never resolves to a file that declares routes, which
+  // `resolveNodeRoutes` decides when it walks the mount graph.
+  const recordUse = (on: string, offset: number, rawPath: string | null, args: Array<{ text: string; start: number }>) => {
+    const use: UseCall = { on, offset, prefix: rawPath === null ? null : scopePrefix(rawPath), args: describe(args) };
+    uses.push(use);
+    for (const arg of use.args) {
+      if (!arg.ident || (!localRouters.has(arg.ident) && !imports.has(arg.ident))) continue;
+      mounts.push({ prefix: normalizePath(rawPath || '/'), ident: arg.ident, on, offset, use });
+    }
+  };
+
+  // <ident>.<verb>('<path>' [, middleware...], handler)
   const callRe = new RegExp(
-    `(?<![\\w$.])([A-Za-z_$][\\w$]*)\\s*\\.\\s*(${VERBS}|use|route)\\s*\\(\\s*(['"\`])([^'"\`\\n]*)\\3([^\\n]*)`,
+    `(?<![\\w$.])([A-Za-z_$][\\w$]*)\\s*\\.\\s*(${VERBS}|use|route)\\s*\\(\\s*(['"\`])([^'"\`\\n]*)\\3`,
     'g',
   );
 
   for (const match of masked.matchAll(callRe)) {
-    const [, ident, verb, , rawPath, rest] = match as unknown as [
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-    ];
+    const [, ident, verb, , rawPath] = match as unknown as [string, string, string, string, string];
     if (CLIENT_SET.has(ident)) continue;
 
     const index = match.index ?? 0;
     const line = lineOf(masked, index);
+    const open = masked.indexOf('(', index + ident.length);
+    // Unreadable arguments never cost a route: it is listed without middleware.
+    const args = routeArguments(masked, open);
+    const rest = args.slice(1);
 
-    // This call's bare identifier arguments, read left to right. The router is
-    // not always the next one — `app.use('/api', requireAuth, router)` puts
-    // middleware in between, and Express mounts every handler at that prefix.
-    // Reading strictly from the start keeps a chained `.route('/x').get(fn)`
-    // from being mistaken for an argument list.
-    const argIdents: string[] = [];
-    for (let tail = rest; ; ) {
-      const arg = /^\s*,\s*([A-Za-z_$][\w$]*)\s*(?=[,)])/.exec(tail);
-      if (!arg) break;
-      argIdents.push(arg[1]!);
-      tail = tail.slice(arg[0].length);
-    }
-
-    // `app.use('/api', router)` and Hono's `app.route('/api', sub)` are mounts,
-    // not endpoints. Only trust them when the handler is a known router — and
-    // for imports, only once the target turns out to define routes, which
-    // `resolveNodeRoutes` decides when it walks the mount graph.
-    const isMountShape = verb === 'use' || (verb === 'route' && argIdents.length > 0);
-    if (isMountShape) {
-      const prefix = normalizePath(rawPath || '/');
-      for (const argIdent of argIdents) {
-        if (!localRouters.has(argIdent) && !imports.has(argIdent)) continue;
-        mounts.push({ prefix, ident: argIdent });
-      }
+    // `app.use('/api', auth, router)` and Hono's `app.route('/api', sub)` are
+    // mounts, not endpoints; `app.use('/admin', requireAdmin)` scopes
+    // middleware to a path.
+    if (verb === 'use' || (verb === 'route' && rest.length > 0)) {
+      recordUse(ident, index, rawPath, rest);
       continue;
     }
 
@@ -117,36 +142,60 @@ export function analyzeNodeServer(file: ScannedFile, masked: string): NodeServer
     const path = normalizePath(canonicalizeParams(rawPath));
 
     if (verb === 'route') {
-      // `router.route('/x').get(h).post(h)` — read the chained verbs.
-      const chained = [...rest.matchAll(new RegExp(`\\.\\s*(${VERBS})\\s*\\(`, 'g'))].map((m) =>
-        toMethod(m[1]),
-      );
-      const methods = chained.length > 0 ? chained : (['ALL'] as Method[]);
-      for (const method of methods) routes.push({ ident, method, path, line });
+      // `router.route('/x').get(auth, h).post(h)` — each chained verb is a route.
+      let at = closeOf(masked, open);
+      let chained = 0;
+      while (at > 0) {
+        const next = new RegExp(`^\\s*\\.\\s*(${VERBS})\\s*\\(`).exec(masked.slice(at, at + 60));
+        if (!next) break;
+        const paren = at + next[0].length - 1;
+        const verbArgs = routeArguments(masked, paren);
+        routes.push({
+          ident,
+          method: toMethod(next[1]),
+          path,
+          line,
+          offset: index,
+          middleware: inlineMiddleware(verbArgs, file.rel, masked),
+        });
+        at = closeOf(masked, paren);
+        chained++;
+      }
+      if (chained === 0) routes.push({ ident, method: 'ALL', path, line, offset: index, middleware: [] });
       continue;
     }
 
-    routes.push({ ident, method: toMethod(verb), path, line });
+    routes.push({
+      ident,
+      method: toMethod(verb),
+      path,
+      line,
+      offset: index,
+      middleware: inlineMiddleware(rest, file.rel, masked),
+    });
   }
 
-  // `app.use(router)` — a mount with no path, which Express reads as `/`. The
-  // loop above only sees the form that leads with a string literal.
-  for (const match of masked.matchAll(
-    /(?<![\w$.])([A-Za-z_$][\w$]*)\s*\.\s*use\s*\(([^)\n]*)\)/g,
-  )) {
-    if (CLIENT_SET.has(match[1]!) || !isRouter(match[1]!)) continue;
-    const args = match[2]!;
-    // A leading string is the prefixed form, already handled.
-    if (/^\s*['"`]/.test(args)) continue;
+  // `app.use(auth)`, `app.use(router)` — middleware, or a mount at `/`, with no
+  // path. The loop above only sees the form that leads with a string literal.
+  for (const match of masked.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*\.\s*use\s*\(/g)) {
+    const ident = match[1]!;
+    if (CLIENT_SET.has(ident) || !isRouter(ident)) continue;
+    const open = (match.index ?? 0) + match[0].length - 1;
+    const args = routeArguments(masked, open);
+    // A leading string is the path-scoped form, already handled.
+    if (!args || args.length === 0 || /^['"`]/.test(args[0]!.text)) continue;
+    recordUse(ident, match.index ?? 0, null, args);
+  }
 
-    for (const arg of args.split(',')) {
-      const ident = /^\s*([A-Za-z_$][\w$]*)\s*$/.exec(arg)?.[1];
-      if (!ident) continue;
-      // Only a known router counts; `app.use(requireAuth)` is middleware, and
-      // a middleware module never resolves to a file that declares routes.
-      if (!localRouters.has(ident) && !imports.has(ident)) continue;
-      mounts.push({ prefix: '/', ident });
-    }
+  // Fastify: `fastify.addHook('preHandler', auth)` runs in front of every route
+  // in the plugin, whenever it was added.
+  for (const match of masked.matchAll(
+    /(?<![\w$.])([A-Za-z_$][\w$]*)\s*\.\s*addHook\s*\(\s*(['"])(onRequest|preParsing|preValidation|preHandler)\2\s*,/g,
+  )) {
+    const open = masked.indexOf('(', (match.index ?? 0) + match[1]!.length);
+    const args = callArguments(masked, open);
+    if (!args || args.length < 2) continue;
+    uses.push({ on: match[1]!, offset: -1, prefix: null, args: describe(args.slice(1)) });
   }
 
   // Hono's generic form: `app.on('GET', '/path', handler)`
@@ -155,9 +204,18 @@ export function analyzeNodeServer(file: ScannedFile, masked: string): NodeServer
     const [, ident, methodArg, , rawPath] = match as unknown as [string, string, string, string, string];
     if (!rawPath.startsWith('/') || !isRouter(ident)) continue;
     const path = normalizePath(canonicalizeParams(rawPath));
-    const line = lineOf(masked, match.index ?? 0);
+    const index = match.index ?? 0;
+    const line = lineOf(masked, index);
+    const args = routeArguments(masked, masked.indexOf('(', index + ident.length));
     for (const raw of methodArg.match(/[A-Za-z]+/g) ?? []) {
-      routes.push({ ident, method: toMethod(raw), path, line });
+      routes.push({
+        ident,
+        method: toMethod(raw),
+        path,
+        line,
+        offset: index,
+        middleware: inlineMiddleware(args.slice(2), file.rel, masked),
+      });
     }
   }
 
@@ -165,27 +223,39 @@ export function analyzeNodeServer(file: ScannedFile, masked: string): NodeServer
   for (const match of masked.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*\.\s*ws\s*\(\s*(['"`])([^'"`\n]*)\2/g)) {
     const rawPath = match[3]!;
     if (!rawPath.startsWith('/') || !isRouter(match[1]!)) continue;
+    const index = match.index ?? 0;
+    const args = routeArguments(masked, masked.indexOf('(', index + match[1]!.length));
     routes.push({
       ident: match[1]!,
       method: 'WS',
       path: normalizePath(canonicalizeParams(rawPath)),
-      line: lineOf(masked, match.index ?? 0),
+      line: lineOf(masked, index),
+      offset: index,
+      middleware: inlineMiddleware(args.slice(1), file.rel, masked),
     });
   }
 
-  // Fastify: `app.route({ method: 'GET', url: '/x' })`
-  for (const match of masked.matchAll(/\.\s*route\s*\(\s*\{([\s\S]{0,400}?)\}/g)) {
-    const body = match[1]!;
+  // Fastify: `app.route({ method: 'GET', url: '/x', preHandler: auth, handler })`
+  for (const match of masked.matchAll(/(?:(?<![\w$.])([A-Za-z_$][\w$]*)\s*)?\.\s*route\s*\(\s*\{([\s\S]{0,400}?)\}/g)) {
+    const body = match[2]!;
     const url = /url\s*:\s*['"`]([^'"`]+)['"`]/.exec(body)?.[1];
     if (!url || !url.startsWith('/')) continue;
     const methodMatches = body.match(/method\s*:\s*(\[[^\]]*\]|['"][A-Za-z]+['"])/)?.[1] ?? "'GET'";
-    const line = lineOf(masked, match.index ?? 0);
+    const index = match.index ?? 0;
+    const line = lineOf(masked, index);
+    const open = masked.indexOf('{', index);
+    const options = masked.slice(open, closeOf(masked, open));
+    const source = { file: file.rel, line };
+    const handler = objectProperties(options, 0).get('handler')?.value ?? '';
+    const middleware = [...hookOptions(options, source), ...handlerChecks(handler, source)];
     for (const raw of methodMatches.match(/[A-Za-z]+/g) ?? ['GET']) {
       routes.push({
-        ident: 'app',
+        ident: match[1] ?? 'app',
         method: toMethod(raw),
         path: normalizePath(canonicalizeParams(url)),
         line,
+        offset: index,
+        middleware,
       });
     }
   }
@@ -214,7 +284,7 @@ export function analyzeNodeServer(file: ScannedFile, masked: string): NodeServer
     }
 
     if (!localRouters.has(ident) && !imports.has(ident)) continue;
-    mounts.push({ prefix, ident });
+    mounts.push({ prefix, ident, offset: match.index ?? 0 });
   }
 
   // `app.register(routes)` — no options, so no prefix: the plugin's routes sit
@@ -222,12 +292,24 @@ export function analyzeNodeServer(file: ScannedFile, masked: string): NodeServer
   for (const match of masked.matchAll(/\.\s*register\s*\(\s*([A-Za-z_$][\w$]*)\s*\)/g)) {
     const ident = match[1]!;
     if (!localRouters.has(ident) && !imports.has(ident)) continue;
-    mounts.push({ prefix: '/', ident });
+    mounts.push({ prefix: '/', ident, offset: match.index ?? 0 });
   }
 
   const basePath = /\.\s*basePath\s*\(\s*['"`]([^'"`]+)['"`]/.exec(masked)?.[1];
 
+  // Koa: `const router = new Router({ prefix: '/api' })`
+  const routerPrefixes = new Map<string, string>();
+  for (const match of masked.matchAll(
+    /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+Router\s*\(\s*\{([^}]*)\}/g,
+  )) {
+    const prefix = resolvePrefix(/prefix\s*:\s*(['"`][^'"`]*['"`]|[A-Za-z_$][\w$]*)/.exec(match[2]!)?.[1], constants);
+    if (prefix) routerPrefixes.set(match[1]!, prefix);
+  }
+
   if (routes.length === 0 && mounts.length === 0 && dirMounts.length === 0) return null;
+  const apps = collectApps(masked);
+  // Found by separate passes, but they run in the order they are written.
+  uses.sort((a, b) => a.offset - b.offset);
   return {
     rel: file.rel,
     framework,
@@ -236,9 +318,103 @@ export function analyzeNodeServer(file: ScannedFile, masked: string): NodeServer
     dirMounts,
     imports,
     localRouters,
-    isEntry: isEntryPoint(masked, collectApps(masked)),
+    isEntry: isEntryPoint(masked, apps),
     basePath: basePath ? normalizePath(basePath) : undefined,
+    routerPrefixes,
+    uses,
+    apps,
   };
+}
+
+const FUNCTION_START = /^(?:async\s+)?(?:function\b|\([^()]*\)\s*(?::[^=]+)?=>|[A-Za-z_$][\w$]*\s*=>)/;
+
+/**
+ * A route registration's arguments, read one at a time up to its handler.
+ * Middleware always comes before the handler, so the handler's body — where a
+ * regex literal or an odd bracket can throw off any reading of the whole call
+ * — never stands between a route and its middleware. The handler's text runs
+ * to the end of the call when that can be found, or else to the next
+ * registration, which is enough to look for a 401 or 403 in it.
+ */
+function routeArguments(masked: string, open: number): Array<{ text: string; start: number }> {
+  const whole = callArguments(masked, open);
+  if (whole) return whole;
+
+  const args: Array<{ text: string; start: number }> = [];
+  let i = open + 1;
+  while (i < masked.length) {
+    while (/\s/.test(masked[i] ?? '')) i++;
+    if (masked[i] === ')' || i >= masked.length) break;
+    const start = i;
+
+    if (FUNCTION_START.test(masked.slice(i, i + 200))) {
+      const next = /\n(?=[A-Za-z_$][\w$]*\s*\.\s*[a-z]+\s*\(|export\s)/g;
+      next.lastIndex = i;
+      const end = next.exec(masked)?.index ?? Math.min(masked.length, i + 6000);
+      args.push({ text: masked.slice(start, end).trim(), start });
+      break;
+    }
+
+    // One argument: up to the next comma or closing paren at this level.
+    let depth = 0;
+    for (; i < masked.length; i++) {
+      const char = masked[i]!;
+      if (char === '"' || char === "'") i = endOfQuoted(masked, i);
+      else if (char === '`') i = endOfTemplate(masked, i);
+      else if (char === '(' || char === '[' || char === '{') depth++;
+      else if (char === ')' || char === ']' || char === '}') {
+        if (depth === 0) break;
+        depth--;
+      } else if (char === ',' && depth === 0) break;
+    }
+    args.push({ text: masked.slice(start, i).trim(), start });
+    if (masked[i] !== ',') break;
+    i++;
+  }
+  return args;
+}
+
+/** The path a `use()` covers: Express's `/admin`, Hono's `/admin/*`. */
+function scopePrefix(rawPath: string): string {
+  return normalizePath(rawPath.replace(/\/?\*+$/, '') || '/');
+}
+
+/**
+ * The middleware a route is registered with: every argument between its path
+ * and its handler, Fastify's hook options, and any permission check the
+ * handler makes itself.
+ */
+function inlineMiddleware(
+  args: Array<{ text: string; start: number }>,
+  rel: string,
+  masked: string,
+): MiddlewareRef[] {
+  if (args.length === 0) return [];
+  const handler = args[args.length - 1]!;
+  const refs: MiddlewareRef[] = [];
+  for (const arg of args.slice(0, -1)) {
+    const source = { file: rel, line: lineOf(masked, arg.start) };
+    if (arg.text.startsWith('{')) {
+      refs.push(...hookOptions(arg.text, source));
+      continue;
+    }
+    for (const described of describeArgument(arg.text)) refs.push(middlewareRef(described.name, 'route', source));
+  }
+  refs.push(...handlerChecks(handler.text, { file: rel, line: lineOf(masked, handler.start) }));
+  return refs;
+}
+
+/** Fastify route options: the hooks that run before the handler, and schema validation. */
+function hookOptions(options: string, source: SourceRef): MiddlewareRef[] {
+  const properties = objectProperties(options, 0);
+  const refs: MiddlewareRef[] = [];
+  for (const hook of ['onRequest', 'preParsing', 'preValidation', 'preHandler']) {
+    const value = properties.get(hook)?.value;
+    if (!value) continue;
+    for (const described of describeArgument(value)) refs.push(middlewareRef(described.name, 'route', source));
+  }
+  if (properties.has('schema')) refs.push({ name: 'schema', kind: 'validation', scope: 'route', source });
+  return refs;
 }
 
 /** `const API_PREFIX = '/api/v1'` — prefixes are often named, not inline. */
@@ -271,18 +447,19 @@ function detectFramework(masked: string): Framework {
 
 /** Constructors that make a whole application, as opposed to a sub-router. */
 const APP_PATTERNS = [
-  // The constructor is often imported under a capitalised name.
-  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:express|Express)\s*\(/g,
-  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:fastify|Fastify)\s*\(/g,
-  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+Koa\b/g,
+  // The constructor is often imported under a capitalised name, and the
+  // variable often typed: `const app: Express = express()`.
+  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+\s*)?=\s*(?:express|Express)\s*\(/g,
+  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+\s*)?=\s*(?:fastify|Fastify)\s*\(/g,
+  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+\s*)?=\s*new\s+Koa\b/g,
   // Hono serves as both, so it counts as an app: assuming otherwise would
   // strand the routes of a Hono app nothing else mounts.
-  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+Hono\b/g,
+  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+\s*)?=\s*new\s+Hono\b/g,
 ];
 
 const ROUTER_PATTERNS = [
-  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:express\.)?Router\s*\(/g,
-  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+Router\b/g,
+  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+\s*)?=\s*(?:express\.)?Router\s*\(/g,
+  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+\s*)?=\s*new\s+Router\b/g,
 ];
 
 /**
@@ -346,9 +523,39 @@ function collectImports(masked: string): Map<string, string> {
 }
 
 /**
+ * The prefix a router carries inside its own file: the file's `basePath`, the
+ * prefix it was constructed with, and the path another router in the same file
+ * mounted it at.
+ */
+function ownPrefix(analysis: NodeServerAnalysis, ident: string | undefined): string {
+  if (!ident) return joinPath(analysis.basePath);
+  const mountedAt = analysis.mounts.find(
+    (mount) => mount.ident === ident && analysis.localRouters.has(ident),
+  )?.prefix;
+  return joinPath(analysis.basePath, mountedAt, analysis.routerPrefixes.get(ident));
+}
+
+
+/** Middleware on its way to a route, scoped to `under` when its `use()` named a path. */
+interface Pending {
+  ref: MiddlewareRef;
+  under?: string;
+}
+
+interface Edge {
+  target: string;
+  prefix: string;
+  /** The router it was mounted on, and where, to know what was in front of it by then. */
+  on?: string;
+  offset: number;
+  use?: UseCall;
+}
+
+/**
  * Turn per-file analyses into absolute route paths by walking the mount graph.
  * A file mounted at two prefixes yields its routes twice, which is what the
- * running server actually does.
+ * running server actually does. Middleware travels the same graph: a route
+ * runs behind everything its routers were mounted behind, outermost first.
  */
 export function resolveNodeRoutes(
   analyses: NodeServerAnalysis[],
@@ -356,97 +563,109 @@ export function resolveNodeRoutes(
 ): Map<string, RawRoute[]> {
   const byRel = new Map(analyses.map((analysis) => [analysis.rel, analysis]));
 
-  // Edges: source file -> { target file, prefix }
-  const edges = new Map<string, Array<{ target: string; prefix: string }>>();
+  const edges = new Map<string, Edge[]>();
   const mountedTargets = new Set<string>();
+  // Per file, the identifiers that turned out to be routers: a `use()`
+  // argument that is one mounts it; any other argument is middleware.
+  const routers = new Map<string, Set<string>>();
 
-  const addEdge = (from: string, target: string, prefix: string) => {
-    if (target === from || !byRel.has(target)) return;
+  const addEdge = (from: string, edge: Edge) => {
+    if (edge.target === from || !byRel.has(edge.target)) return;
     const list = edges.get(from) ?? [];
-    list.push({ target, prefix });
+    list.push(edge);
     edges.set(from, list);
-    mountedTargets.add(target);
+    mountedTargets.add(edge.target);
   };
 
   for (const analysis of analyses) {
+    const known = new Set(analysis.localRouters);
     for (const mount of analysis.mounts) {
       const specifier = analysis.imports.get(mount.ident);
-      if (!specifier) continue;
-      const target = resolveModule(analysis.rel, specifier);
-      if (target) addEdge(analysis.rel, target, mount.prefix);
+      const target = specifier ? resolveModule(analysis.rel, specifier) : null;
+      if (!target || !byRel.has(target)) continue;
+      known.add(mount.ident);
+      // Everything the mounting router sits under applies to what it mounts:
+      // Hono's `basePath`, Koa's router prefix, and its own mount in this file.
+      addEdge(analysis.rel, {
+        target,
+        prefix: joinPath(ownPrefix(analysis, mount.on), mount.prefix),
+        on: mount.on,
+        offset: mount.offset,
+        use: mount.use,
+      });
     }
+    routers.set(analysis.rel, known);
 
     // Directory mounts reach every route file underneath, however deep.
     for (const dirMount of analysis.dirMounts) {
       for (const candidate of analyses) {
         if (!candidate.rel.startsWith(dirMount.dir + '/')) continue;
         const nested = posix.dirname(candidate.rel.slice(dirMount.dir.length + 1));
-        const prefix = dirMount.dirNameRoutePrefix && nested !== '.'
-          ? joinPath(dirMount.prefix, nested)
-          : dirMount.prefix;
-        addEdge(analysis.rel, candidate.rel, prefix);
+        const prefix =
+          dirMount.dirNameRoutePrefix && nested !== '.' ? joinPath(dirMount.prefix, nested) : dirMount.prefix;
+        addEdge(analysis.rel, { target: candidate.rel, prefix, offset: Infinity });
       }
     }
   }
 
-  // Effective prefixes per file, accumulated from every entry point that mounts
-  // it. Only files that serve their own routes seed the walk at `/`; a router
-  // module has to be reached through a mount to earn a prefix.
-  const prefixes = new Map<string, Set<string>>();
+  const routersOf = (analysis: NodeServerAnalysis) => routers.get(analysis.rel) ?? analysis.localRouters;
+
+  // Where each file is served, and what runs in front of it there. Only files
+  // that serve their own routes seed the walk at `/`; a router module has to
+  // be reached through a mount to earn a prefix.
+  const placements = new Map<string, Array<{ prefix: string; chain: Pending[] }>>();
   for (const analysis of analyses) {
     if (mountedTargets.has(analysis.rel)) continue;
     // A root either serves its own routes, or is the file that wires the other
     // modules together — a composition root need not build the app itself.
     if (analysis.isEntry || edges.has(analysis.rel)) {
-      prefixes.set(analysis.rel, new Set(['/']));
+      placements.set(analysis.rel, [{ prefix: '/', chain: [] }]);
     }
   }
 
-  const visit = (rel: string, prefix: string, depth: number, seen: Set<string>) => {
+  const visit = (rel: string, prefix: string, chain: Pending[], depth: number, seen: Set<string>) => {
     if (depth > 8 || seen.has(rel)) return;
     seen.add(rel);
+    const analysis = byRel.get(rel)!;
     for (const edge of edges.get(rel) ?? []) {
       const next = joinPath(prefix, edge.prefix);
-      const set = prefixes.get(edge.target) ?? new Set<string>();
-      if (set.has(next)) continue;
-      set.add(next);
-      prefixes.set(edge.target, set);
-      visit(edge.target, next, depth + 1, new Set(seen));
+      const list = placements.get(edge.target) ?? [];
+      if (list.some((placement) => placement.prefix === next)) continue;
+      const nextChain = [
+        ...chain,
+        ...localChain(analysis, edge.on, edge.offset, prefix, routersOf(analysis)),
+        ...mountedBehind(analysis, edge.use, routersOf(analysis)),
+      ];
+      list.push({ prefix: next, chain: nextChain });
+      placements.set(edge.target, list);
+      visit(edge.target, next, nextChain, depth + 1, new Set(seen));
     }
   };
 
-  for (const rel of [...prefixes.keys()]) visit(rel, '/', 0, new Set());
+  for (const [rel, list] of [...placements]) visit(rel, '/', list[0]!.chain, 0, new Set());
 
   // A router no entry point reaches — dead code, a circular mount, or a mount
   // we could not follow. Its routes are still listed, at the paths it registers
   // them under, but they are marked so nothing claims to know their real URL.
   const unmounted = new Set<string>();
   for (const analysis of analyses) {
-    if (prefixes.has(analysis.rel)) continue;
+    if (placements.has(analysis.rel)) continue;
     unmounted.add(analysis.rel);
-    prefixes.set(analysis.rel, new Set(['/']));
+    placements.set(analysis.rel, [{ prefix: '/', chain: [] }]);
   }
 
   const out = new Map<string, RawRoute[]>();
 
   for (const analysis of analyses) {
-    const filePrefixes = prefixes.get(analysis.rel) ?? new Set(['/']);
-
-    // Routers mounted inside this same file contribute their own prefix.
-    const localPrefix = new Map<string, string>();
-    for (const mount of analysis.mounts) {
-      if (analysis.localRouters.has(mount.ident)) localPrefix.set(mount.ident, mount.prefix);
-    }
-
     const routes: RawRoute[] = [];
     for (const route of analysis.routes) {
-      for (const filePrefix of filePrefixes) {
-        const path = joinPath(
-          filePrefix,
-          analysis.basePath,
-          localPrefix.get(route.ident),
-          route.path,
-        );
+      for (const placement of placements.get(analysis.rel)!) {
+        const path = joinPath(placement.prefix, ownPrefix(analysis, route.ident), route.path);
+        const pending: Pending[] = [
+          ...placement.chain,
+          ...localChain(analysis, route.ident, route.offset, placement.prefix, routersOf(analysis)),
+          ...route.middleware.map((ref) => ({ ref })),
+        ];
         routes.push({
           kind: 'api',
           method: route.method,
@@ -454,6 +673,7 @@ export function resolveNodeRoutes(
           framework: analysis.framework,
           line: route.line,
           mounted: !unmounted.has(analysis.rel),
+          middleware: pending.filter((item) => !item.under || covers(item.under, path)).map((item) => item.ref),
         });
       }
     }
@@ -462,4 +682,71 @@ export function resolveNodeRoutes(
   }
 
   return out;
+}
+
+/**
+ * What runs in front of anything registered on `ident` at `offset`: every
+ * earlier `use()` on it, and — when it is a router mounted on another one in
+ * the same file — everything in front of that one where it was mounted.
+ */
+function localChain(
+  analysis: NodeServerAnalysis,
+  ident: string | undefined,
+  offset: number,
+  filePrefix: string,
+  routers: Set<string>,
+  depth = 0,
+): Pending[] {
+  if (!ident || depth > 6) return [];
+  const chain: Pending[] = [];
+
+  const parent = analysis.mounts.find(
+    (mount) => mount.ident === ident && analysis.localRouters.has(ident) && mount.on && mount.on !== ident,
+  );
+  if (parent) {
+    chain.push(...localChain(analysis, parent.on, parent.offset, filePrefix, routers, depth + 1));
+    chain.push(...mountedBehind(analysis, parent.use, routers, ident));
+  }
+
+  const scope = analysis.apps.has(ident) ? 'app' : 'router';
+  const base = joinPath(filePrefix, ownPrefix(analysis, ident));
+  for (const use of analysis.uses) {
+    if (use.on !== ident || use.offset >= offset) continue;
+    const under = use.prefix ? joinPath(base, use.prefix) : undefined;
+    // The middleware in a mount's call runs for everything under its path —
+    // later routes on the same router included — but not the routers it mounts.
+    for (const arg of use.args) {
+      if (arg.ident && routers.has(arg.ident)) continue;
+      const ref = middlewareRef(arg.name, scope, { file: analysis.rel, line: arg.line });
+      chain.push(under ? { ref, under } : { ref });
+    }
+  }
+  return chain;
+}
+
+/**
+ * The middleware a router was mounted behind in the same call:
+ * `app.use('/api', auth, users)` puts `auth` in front of `users`. Arguments
+ * after the router only run if it passes the request on, so they are left out.
+ */
+function mountedBehind(
+  analysis: NodeServerAnalysis,
+  use: UseCall | undefined,
+  routers: Set<string>,
+  ident?: string,
+): Pending[] {
+  if (!use) return [];
+  const chain: Pending[] = [];
+  for (const arg of use.args) {
+    const isRouter = arg.ident !== undefined && routers.has(arg.ident);
+    if (isRouter && (ident === undefined || arg.ident === ident)) break;
+    if (isRouter) continue;
+    chain.push({ ref: middlewareRef(arg.name, 'mount', { file: analysis.rel, line: arg.line }) });
+  }
+  return chain;
+}
+
+/** Whether middleware scoped to `under` runs for `path`. */
+function covers(under: string, path: string): boolean {
+  return under === '/' || path === under || path.startsWith(`${under}/`);
 }

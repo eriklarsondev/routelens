@@ -6,8 +6,8 @@ export function StatusBar({ data, error }: { data: DashboardData | null; error: 
     : !data
       ? ['Scanning…']
       : [
-          data.stats.frameworks.length > 0
-            ? data.stats.frameworks.join(' · ')
+          data.stats.frameworks.length + data.stats.routers.length > 0
+            ? [...data.stats.frameworks, ...data.stats.routers].join(' · ')
             : 'no framework detected',
           `${data.stats.filesScanned} files in ${data.stats.durationMs}ms`,
           // The base card above the endpoints says where links point.

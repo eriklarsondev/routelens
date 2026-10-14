@@ -1,0 +1,23 @@
+services:
+  # Listed first on purpose: `portal-legacy` must not be mistaken for `portal`.
+  portal-legacy:
+    build:
+      context: .
+      dockerfile: portal-legacy/Dockerfile
+    environment:
+      VITE_BASE_PATH: '/wrong'
+
+  portal:
+    build:
+      context: .
+      dockerfile: portal/Dockerfile
+    environment:
+      NODE_ENV: development
+      VITE_BASE_PATH: '/apps/portal'
+    volumes:
+      - './portal/src:/app/src:delegated'
+
+  shop:
+    image: node:20
+    volumes:
+      - ./shop:/app

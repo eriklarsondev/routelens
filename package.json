@@ -1,10 +1,11 @@
 {
   "name": "routelens",
-  "version": "0.1.0",
-  "description": "See every endpoint in your app. Scans client and server code, maps routes to the calls that hit them, and gives you one keystroke access to any of them.",
+  "version": "0.2.0",
+  "description": "See every URL in your app: the endpoints your server answers, the pages your client serves, and the calls between them, one click from opening any of them.",
   "keywords": [
     "routes",
     "endpoints",
+    "pages",
     "api",
     "next",
     "express",
@@ -12,39 +13,46 @@
     "hono",
     "nest",
     "fastapi",
+    "react-router",
+    "vue-router",
     "devtool",
     "cli"
   ],
   "license": "MIT",
+  "author": "Erik Larson",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eriklarsondev/routelens.git"
+  },
+  "homepage": "https://github.com/eriklarsondev/routelens#readme",
+  "bugs": {
+    "url": "https://github.com/eriklarsondev/routelens/issues"
+  },
   "type": "module",
   "main": "./dist/server/index.js",
   "types": "./dist/server/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/server/index.d.ts",
-      "import": "./dist/server/index.js"
+      "default": "./dist/server/index.js"
     },
     "./fetch": {
       "types": "./dist/server/fetch-handler.d.ts",
-      "import": "./dist/server/fetch-handler.js"
+      "default": "./dist/server/fetch-handler.js"
     },
     "./vite": {
       "types": "./dist/server/vite.d.ts",
-      "import": "./dist/server/vite.js"
+      "default": "./dist/server/vite.js"
     },
     "./scan": {
       "types": "./dist/server/scan.d.ts",
-      "import": "./dist/server/scan.js"
+      "default": "./dist/server/scan.js"
     },
     "./package.json": "./package.json",
-    "./auto": {
-      "types": "./dist/server/auto/preload.d.ts",
-      "import": "./dist/server/auto/preload.js",
-      "require": "./dist/server/auto/preload.js"
-    },
+    "./auto": "./dist/server/auto/preload.cjs",
     "./wire": {
       "types": "./dist/server/auto/wire.d.ts",
-      "import": "./dist/server/auto/wire.js"
+      "default": "./dist/server/auto/wire.js"
     }
   },
   "bin": {
@@ -57,24 +65,29 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=18.18"
   },
   "scripts": {
     "build": "npm run build:server && npm run build:client",
-    "build:server": "tsc && chmod +x dist/server/cli.js",
+    "build:server": "node scripts/build-server.mjs",
     "build:client": "node build.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.client.json",
     "dev": "tsc --watch",
-    "prepublishOnly": "npm run build",
-    "test": "npm run build && node --test \"test/*.test.js\"",
+    "prepublishOnly": "npm run typecheck && npm test",
+    "test": "npm run build && node scripts/test.mjs",
     "lens": "npm run build && node dist/server/cli.js",
     "postinstall": "node -e \"import('./dist/server/auto/postinstall.js').catch(()=>{})\""
   },
   "devDependencies": {
+    "@radix-ui/react-tooltip": "^1.4.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "esbuild": "^0.28.2",
+    "express": "^5.3.0",
+    "fastify": "^5.12.7",
+    "hono": "^4.13.13",
+    "koa": "^3.2.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwindcss": "^4.3.3",

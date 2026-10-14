@@ -9,8 +9,12 @@ export { serve } from './http-server.js';
 export type { ServeOptions, ServeResult } from './http-server.js';
 export { renderDashboard } from './dashboard.js';
 export type {
+  ClientApp,
   ClientCall,
   ClientLibrary,
+  ClientLink,
+  ClientPage,
+  ClientRouter,
   Framework,
   Method,
   RouteLensOptions,

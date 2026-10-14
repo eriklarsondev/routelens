@@ -33,6 +33,31 @@ const DEFAULT_CLIENT_IDENTIFIERS = [
 
 const VERBS = 'get|post|put|patch|delete|del|head|options';
 
+/** TypeScript type arguments between a callee and its call: `api.get<User[]>(…)`. */
+const TYPE_ARGS = '(?:\\s*<[\\s\\S]{0,300}?>)?';
+
+/**
+ * The inside of a quoted URL argument. In a template, `${…}` may hold strings
+ * or a template of its own — `${qs ? `?${qs}` : ''}` — which must not end the
+ * URL early.
+ */
+const URL_BODY = "((?:\\$\\{(?:[^{}`'\"\\n]|`[^`\\n]*`|'[^'\\n]*'|\"[^\"\\n]*\")*\\}|[^'\"`\\n])*?)";
+
+/** A callee: a name, or a member chain like `client.send`. */
+const CALLEE = '((?:[A-Za-z_$][\\w$]*\\s*\\.\\s*)*[A-Za-z_$][\\w$]*)';
+
+/**
+ * A URL literal's text: a path, optionally behind an origin built from
+ * expressions (`${BASE_URL}`, `${proto}://${window.location.host}`), and
+ * optionally followed by a query string.
+ */
+const URL_TEXT =
+  '((?:\\$\\{[A-Za-z_$][\\w$.]*\\}|:\\/\\/)*\\/[A-Za-z0-9_\\-./[\\]:{}$]*' +
+  // A query glued on by an expression, possibly holding a template of its own:
+  // `${qs ? `?${qs}` : ''}`.
+  '(?:\\$\\{(?:[^{}`\'"\\n]|`[^`\\n]*`|\'[^\'\\n]*\'|"[^"\\n]*")*\\})?' +
+  '(?:[?#][^\'"`\\n]*)?)';
+
 export interface ClientDetectOptions {
   apiPrefixes: string[];
   clientIdentifiers: string[];
@@ -60,6 +85,9 @@ export function detectClientCalls(
   const calls: RawCall[] = [];
   const constants = collectStringConstants(masked);
   const usedAsBase = new Set<string>();
+  // Where each recorded call's URL literal sits, so the literal pass at the end
+  // never counts a URL again — not even one on the line after its call.
+  const claimed = new Set<number>();
   const push = (
     match: RegExpMatchArray,
     raw: string,
@@ -68,6 +96,7 @@ export function detectClientCalls(
     via?: string,
   ) => {
     const offset = match.index ?? 0;
+    claimed.add(offset + match[0].indexOf(raw));
     const resolved = substituteConstants(raw, constants, usedAsBase);
     calls.push({
       method,
@@ -83,14 +112,28 @@ export function detectClientCalls(
   // fetch('/api/users', { method: 'POST' })
   // The init-object window is a lookahead, not a capture: consuming it would
   // swallow whatever call comes next in the file.
-  for (const match of masked.matchAll(/(?<![\w$.])fetch\s*\(\s*(['"`])([^'"`\n]*)\1(?=([\s\S]{0,400}))/g)) {
+  for (const match of masked.matchAll(
+    new RegExp(`(?<![\\w$.])fetch\\s*\\(\\s*(['"\`])${URL_BODY}\\1(?=([\\s\\S]{0,400}))`, 'g'),
+  )) {
     push(match, match[2]!, 'fetch', methodFromOptions(match[3]) ?? 'GET');
+  }
+
+  // ky('/api/users', { method: 'post' }), got('/api/users'), and Nuxt's
+  // $fetch('/api/users', { method: 'POST' }): the clients called as functions.
+  for (const match of masked.matchAll(
+    new RegExp(
+      `(?<![\\w$.])(ky|got|\\$fetch)${TYPE_ARGS}\\s*\\(\\s*(['"\`])${URL_BODY}\\2(?=([\\s\\S]{0,400}))`,
+      'g',
+    ),
+  )) {
+    const library: ClientLibrary = match[1] === '$fetch' ? 'nuxt' : (match[1] as 'ky' | 'got');
+    push(match, match[3]!, library, methodFromOptions(match[4]) ?? 'GET');
   }
 
   // axios.post('/api/users', body) and friends
   const identifiers = [...DEFAULT_CLIENT_IDENTIFIERS, ...options.clientIdentifiers.map(escapeRe)];
   const verbRe = new RegExp(
-    `(?<![\\w$.])(${identifiers.join('|')})\\s*\\.\\s*(${VERBS})\\s*\\(\\s*(['"\`])([^'"\`\\n]*)\\3`,
+    `(?<![\\w$.])(${identifiers.join('|')})\\s*\\.\\s*(${VERBS})${TYPE_ARGS}\\s*\\(\\s*(['"\`])${URL_BODY}\\3`,
     'g',
   );
   for (const match of masked.matchAll(verbRe)) {
@@ -98,7 +141,9 @@ export function detectClientCalls(
   }
 
   // axios('/api/users', { method }) and axios({ url: '/api/users', method })
-  for (const match of masked.matchAll(/(?<![\w$.])axios\s*\(\s*(['"`])([^'"`\n]*)\1(?=([\s\S]{0,400}))/g)) {
+  for (const match of masked.matchAll(
+    new RegExp(`(?<![\\w$.])axios\\s*\\(\\s*(['"\`])${URL_BODY}\\1(?=([\\s\\S]{0,400}))`, 'g'),
+  )) {
     push(match, match[2]!, 'axios', methodFromOptions(match[3]) ?? 'GET');
   }
   for (const match of masked.matchAll(
@@ -112,7 +157,10 @@ export function detectClientCalls(
 
   // SWR / TanStack Query / Nuxt data fetching with a literal key
   for (const match of masked.matchAll(
-    /(?<![\w$.])(useSWR|useSWRMutation|useSWRInfinite|useFetch|useAsyncData|useLazyFetch)\s*\(\s*(['"`])([^'"`\n]*)\2(?=([\s\S]{0,400}))/g,
+    new RegExp(
+      `(?<![\\w$.])(useSWR|useSWRMutation|useSWRInfinite|useFetch|useAsyncData|useLazyFetch)${TYPE_ARGS}\\s*\\(\\s*(['"\`])${URL_BODY}\\2(?=([\\s\\S]{0,400}))`,
+      'g',
+    ),
   )) {
     const raw = match[3]!;
     if (!looksLikeUrl(raw)) continue;
@@ -121,30 +169,162 @@ export function detectClientCalls(
   }
 
   // Realtime transports
-  for (const match of masked.matchAll(/new\s+WebSocket\s*\(\s*(['"`])([^'"`\n]*)\1/g)) {
+  for (const match of masked.matchAll(new RegExp(`new\\s+WebSocket\\s*\\(\\s*(['"\`])${URL_BODY}\\1`, 'g'))) {
     push(match, match[2]!, 'websocket', 'WS');
   }
-  for (const match of masked.matchAll(/new\s+EventSource\s*\(\s*(['"`])([^'"`\n]*)\1/g)) {
+  for (const match of masked.matchAll(new RegExp(`new\\s+EventSource\\s*\\(\\s*(['"\`])${URL_BODY}\\1`, 'g'))) {
     push(match, match[2]!, 'eventsource', 'SSE');
   }
 
   if (!options.includeLiterals) return calls;
 
-  // Endpoint constants: any string literal under a known API prefix.
-  const seen = new Set(calls.map((call) => `${call.line}:${call.raw}`));
-  const literalRe = /(['"`])(\/[A-Za-z0-9_\-./[\]:{}$]*)\1/g;
+  // An app's own helpers: `makeJsonRequest(`${BASE_URL}/api/users`, 'POST')`.
+  // Most apps call fetch in one place and everything else through a wrapper,
+  // so a call of any function whose first argument is an API URL is a request.
+  // The method is the next argument when it names one, else the options'.
+  const wrapperRe = new RegExp(
+    `(?<![\\w$.])${CALLEE}${TYPE_ARGS}\\s*\\(\\s*(['"\`])${URL_BODY}\\2(?=([\\s\\S]{0,400}))`,
+    'g',
+  );
+  for (const match of masked.matchAll(wrapperRe)) {
+    const callee = match[1]!.replace(/\s+/g, '');
+    const raw = match[3]!;
+    const path = pathOf(raw);
+    if (!path || !hasApiPrefix(path, options.apiPrefixes) || isNavigation(callee)) continue;
+    if (/^(fetch|axios|import|require)$/.test(callee)) continue;
+    if (claimed.has((match.index ?? 0) + match[0].indexOf(raw))) continue;
+
+    const method = methodArgument(match[4]) ?? methodFromOptions(match[4]);
+    // `const url = buildApiUrl('/api/x')` builds a URL: what it is for shows
+    // where `url` goes next.
+    const use = method ? null : useOfAssigned(masked, match.index ?? 0);
+    if (use === false) continue;
+    push(match, raw, use?.library ?? 'wrapper', use?.method ?? method ?? 'UNKNOWN', use ? use.via : callee);
+  }
+
+  // The same helpers written method-first: `apiRequest('POST', `${BASE}/api/x`)`.
+  const methodFirstRe = new RegExp(
+    `(?<![\\w$.])${CALLEE}${TYPE_ARGS}\\s*\\(\\s*(['"])([A-Za-z]+)\\2\\s*,\\s*(['"\`])${URL_BODY}\\4`,
+    'g',
+  );
+  for (const match of masked.matchAll(methodFirstRe)) {
+    const callee = match[1]!.replace(/\s+/g, '');
+    const method = toMethod(match[3]);
+    const raw = match[5]!;
+    const path = pathOf(raw);
+    if (method === 'UNKNOWN' || !path || !hasApiPrefix(path, options.apiPrefixes)) continue;
+    if (isNavigation(callee)) continue;
+    if (claimed.has((match.index ?? 0) + match[0].lastIndexOf(raw))) continue;
+    push(match, raw, 'wrapper', method, callee);
+  }
+
+  // Endpoint constants: any string literal under a known API prefix, including
+  // one behind an origin expression (`${BASE_URL}/api/users`). One kept in a
+  // variable is followed to the call that uses it, which says what it is for.
+  const literalRe = new RegExp(`(['"\`])${URL_TEXT}\\1`, 'g');
   for (const match of masked.matchAll(literalRe)) {
     const raw = match[2]!;
-    if (!hasApiPrefix(raw, options.apiPrefixes)) continue;
+    const at = (match.index ?? 0) + 1;
+    if (claimed.has(at) || !hasApiPrefix(pathOf(raw) ?? '', options.apiPrefixes)) continue;
     // A base path already folded into a call above is not an endpoint of its own.
     if (usedAsBase.has(raw)) continue;
-    const line = lineOf(masked, match.index ?? 0);
-    if (seen.has(`${line}:${raw}`)) continue;
-    seen.add(`${line}:${raw}`);
-    push(match, raw, 'literal', 'UNKNOWN');
+    // `navigate('/api/…')` is where the browser goes, not a request.
+    const callee = /([A-Za-z_$][\w$.]*)\s*\(\s*$/.exec(masked.slice(Math.max(0, at - 81), at - 1));
+    if (callee && isNavigation(callee[1]!)) continue;
+
+    const use = useOfAssigned(masked, match.index ?? 0);
+    if (use === false) continue;
+    push(match, raw, use?.library ?? 'literal', use?.method ?? 'UNKNOWN', use?.via);
   }
 
   return calls;
+}
+
+interface Use {
+  library: ClientLibrary;
+  method: Method;
+  via?: string;
+}
+
+const NOT_A_REQUEST =
+  /^(?:console|logger|log|debug|Sentry)\b|^(?:URL|String|JSON\.\w+|encodeURI(?:Component)?|decodeURI(?:Component)?|set[A-Z]\w*|use(?:State|Ref|Memo|Callback))$/;
+
+/**
+ * What the value at `start` is used for when it is assigned to a variable:
+ * `const url = …` and then `fetch(url, { method: 'DELETE' })`,
+ * `makeJsonRequest(url, 'PATCH')` or `new WebSocket(url)` further on. Null
+ * when it is not assigned or never handed to a call; false when it goes to a
+ * navigation, which makes it a link rather than a request.
+ */
+function useOfAssigned(masked: string, start: number): Use | null | false {
+  const before = masked.slice(Math.max(0, start - 120), start);
+  const name = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;\n]+)?=\s*(?:await\s+)?$/.exec(before)?.[1];
+  if (!name) return null;
+
+  // Only as far as the name keeps meaning the same thing.
+  let scope = masked.slice(start, start + 2500);
+  const redeclared = new RegExp(`\\b(?:const|let|var)\\s+${name}\\b`).exec(scope.slice(1));
+  if (redeclared) scope = scope.slice(0, redeclared.index + 1);
+
+  const socket = new RegExp(`new\\s+(WebSocket|EventSource)\\s*\\(\\s*${name}\\b`).exec(scope);
+  // Logging a URL or wrapping it in another value is not what it is for.
+  const call = [
+    ...scope.matchAll(
+      new RegExp(`(?<![\\w$.])${CALLEE}${TYPE_ARGS}\\s*\\(\\s*${name}\\s*(?=[,)])([\\s\\S]{0,400})`, 'g'),
+    ),
+  ].find((candidate) => !NOT_A_REQUEST.test(candidate[1]!.replace(/\s+/g, '')));
+
+  if (socket && (!call || socket.index < call.index)) {
+    return socket[1] === 'WebSocket'
+      ? { library: 'websocket', method: 'WS' }
+      : { library: 'eventsource', method: 'SSE' };
+  }
+  if (!call) return null;
+
+  const callee = call[1]!.replace(/\s+/g, '');
+  const rest = call[2]!;
+  if (isNavigation(callee)) return false;
+  if (callee === 'fetch') return { library: 'fetch', method: methodFromOptions(rest) ?? 'GET' };
+  if (callee === 'axios') return { library: 'axios', method: methodFromOptions(rest) ?? 'GET' };
+
+  const verb = new RegExp(`^([A-Za-z_$][\\w$]*)\\.(${VERBS})$`, 'i').exec(callee);
+  if (verb && DEFAULT_CLIENT_IDENTIFIERS.includes(verb[1]!)) {
+    return { library: libraryOf(verb[1]!), method: toMethod(verb[2]) };
+  }
+  return {
+    library: 'wrapper',
+    method: methodArgument(rest) ?? methodFromOptions(rest) ?? 'UNKNOWN',
+    via: callee,
+  };
+}
+
+/**
+ * The path part of a URL literal: as written when it starts with `/`, or what
+ * follows an origin expression (`${BASE_URL}/api/x`). Absolute URLs are left
+ * to the passes that know the client, since a helper is as likely to call
+ * someone else's API as the app's own.
+ */
+function pathOf(raw: string): string | null {
+  if (raw.startsWith('/')) return raw;
+  const behindOrigin = /^(?:\$\{[^}]*\}|:\/\/)+(\/.*)$/.exec(raw);
+  return behindOrigin ? behindOrigin[1]! : null;
+}
+
+/** Moving the browser somewhere is a link, not a request. */
+function isNavigation(callee: string): boolean {
+  const parts = callee.split('.');
+  const name = parts[parts.length - 1]!;
+  if (/^(navigate|redirect|push|replace|assign|open|prefetch|href|go|t)$/.test(name)) return true;
+  return parts.some((part) => /^(history|router|location|window|navigation)$/i.test(part));
+}
+
+/** `helper(url, 'POST', …)`: a method named straight after the URL. */
+function methodArgument(rest: string | undefined): Method | null {
+  // `)` first when the URL came from a builder: `request(buildUrl('/x'), 'POST')`.
+  const match = rest ? /^\s*\)?\s*,\s*(['"`])([A-Za-z]+)\1/.exec(rest) : null;
+  if (!match) return null;
+  const method = toMethod(match[2]);
+  return method === 'UNKNOWN' || method === 'ALL' ? null : method;
 }
 
 function methodFromOptions(rest: string | undefined): Method | null {

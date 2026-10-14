@@ -9,6 +9,10 @@ const METHOD_COLOR: Record<string, string> = {
   DELETE: 'text-method-delete',
   WS: 'text-method-realtime',
   SSE: 'text-method-realtime',
+  // A page is something you GET; a redirect sends you on to one.
+  PAGE: 'text-method-get',
+  REDIRECT: 'text-method-realtime',
+  LINK: 'text-method-post',
 };
 
 /** The text colour a method is drawn in, wherever it appears. */

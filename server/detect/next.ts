@@ -1,6 +1,6 @@
 import { canonicalizeParams, joinPath, normalizePath, toMethod } from '../paths.js';
 import type { Method, ScannedFile } from '../types.js';
-import type { RawRoute } from './shared.js';
+import { lineOf, type RawRoute } from './shared.js';
 
 const ROUTE_FILES = new Set(['route', 'page']);
 const PAGES_SKIP = new Set(['_app', '_document', '_error', '_middleware', 'middleware', '404', '500']);
@@ -113,7 +113,7 @@ function fromPagesRouter(masked: string, dirs: string[], stem: string): RawRoute
 
 const HTTP_EXPORTS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 
-function exportedMethods(masked: string): Array<{ method: Method; line: number }> {
+export function exportedMethods(masked: string): Array<{ method: Method; line: number }> {
   const found = new Map<Method, number>();
   const patterns = [
     /export\s+(?:async\s+)?function\s+([A-Z]+)\s*\(/g,
@@ -142,10 +142,4 @@ function exportedMethods(masked: string): Array<{ method: Method; line: number }
   }
 
   return [...found].map(([method, line]) => ({ method, line }));
-}
-
-function lineOf(text: string, index: number): number {
-  let line = 1;
-  for (let i = 0; i < index; i++) if (text.charCodeAt(i) === 10) line++;
-  return line;
 }

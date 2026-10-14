@@ -1,4 +1,4 @@
-import type { Framework, Method } from '../types.js';
+import type { Framework, Method, MiddlewareRef } from '../types.js';
 
 /** What a detector returns: a route minus the bookkeeping `scan()` adds. */
 export interface RawRoute {
@@ -9,6 +9,8 @@ export interface RawRoute {
   line: number;
   /** Defaults to true. False when nothing in the project mounts this route. */
   mounted?: boolean;
+  /** What runs before the handler, outermost first. */
+  middleware?: MiddlewareRef[];
 }
 
 /** 1-indexed line number for a character offset. */

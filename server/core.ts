@@ -1,10 +1,9 @@
-import { watch, type FSWatcher } from 'node:fs';
 import { resolve } from 'node:path';
 import { assetContentType, readAsset, renderDashboard } from './dashboard.js';
 import { openInEditor } from './editor.js';
 import { scan } from './scan.js';
 import type { RouteLensOptions, ScanResult } from './types.js';
-import { DEFAULT_EXTENSIONS, DEFAULT_IGNORED_DIRS } from './walk.js';
+import { watchProject, type ProjectWatcher } from './watch.js';
 
 export const DEFAULT_BASE_PATH = '/__routelens';
 
@@ -20,7 +19,7 @@ export interface LensRequest {
   path: string;
   /** Raw query string, with or without a leading `?`. */
   search?: string;
-  /** Request body, for `POST /open` and `POST /proxy`. */
+  /** Request body, for `POST /open`. */
   body?: string;
 }
 
@@ -31,10 +30,7 @@ export interface Lens {
   root: string;
   /** Current scan, re-used until a watched file changes. */
   result(force?: boolean): ScanResult;
-  /**
-   * Returns null when the request is not for routelens. Async only because the
-   * standalone dashboard proxies try-it requests to the real dev server.
-   */
+  /** Returns null when the request is not for routelens. */
   handle(request: LensRequest): Promise<LensResponse | null>;
   /** True when this path should be answered as a Server-Sent Events stream. */
   isEventStream(path: string): boolean;
@@ -66,7 +62,7 @@ export function createLens(options: RouteLensOptions = {}): Lens {
   const allowEditor = options.openInEditor ?? true;
 
   let cached: ScanResult | null = null;
-  let watcher: FSWatcher | null = null;
+  let watcher: ProjectWatcher | null = null;
   const listeners = new Set<Listener>();
 
   const result = (force = false): ScanResult => {
@@ -74,7 +70,7 @@ export function createLens(options: RouteLensOptions = {}): Lens {
     return cached;
   };
 
-  if (shouldWatch) watcher = startWatcher(root, options, () => {
+  if (shouldWatch) watcher = watchProject(root, options, () => {
     cached = null;
     for (const listener of listeners) listener();
   });
@@ -144,37 +140,6 @@ export function createLens(options: RouteLensOptions = {}): Lens {
       listeners.clear();
     },
   };
-}
-
-function startWatcher(
-  root: string,
-  options: RouteLensOptions,
-  onChange: () => void,
-): FSWatcher | null {
-  const ignored = new Set([...DEFAULT_IGNORED_DIRS, ...(options.ignore ?? [])]);
-  const extensions = new Set(options.extensions ?? DEFAULT_EXTENSIONS);
-  let timer: NodeJS.Timeout | null = null;
-
-  try {
-    const watcher = watch(root, { recursive: true }, (_event, filename) => {
-      if (!filename) return;
-      const segments = filename.split(/[\\/]/);
-      if (segments.some((segment) => ignored.has(segment))) return;
-      const dot = segments[segments.length - 1]!.lastIndexOf('.');
-      if (dot < 0 || !extensions.has(segments[segments.length - 1]!.slice(dot))) return;
-
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(onChange, 250);
-      timer.unref?.();
-    });
-    watcher.on('error', () => {});
-    watcher.unref?.();
-    return watcher;
-  } catch {
-    // Recursive watching is unavailable on some platforms; the Rescan button
-    // and `?fresh=1` still work.
-    return null;
-  }
 }
 
 export function normalizeBasePath(input: string): string {

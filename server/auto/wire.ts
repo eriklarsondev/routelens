@@ -89,8 +89,8 @@ export function planWiring(root: string): WirePlan {
         {
           kind: 'note',
           message:
-            `add routelens to ${viteConfig}:  import { routelensVite } from 'routelens/vite'  ` +
-            `then  plugins: [routelensVite()]`,
+            'no code needed: start your dev server with `npx routelens dev` and open /__routelens on it ' +
+            `(or add routelensVite() from 'routelens/vite' to ${viteConfig})`,
         },
       ],
     };
@@ -103,8 +103,8 @@ export function planWiring(root: string): WirePlan {
       {
         kind: 'note',
         message:
-          'no code needed: run `npx routelens` for a standalone dashboard, or start your server ' +
-          'with `node --require routelens/auto server.js` to get /__routelens on it',
+          'no code needed: start your dev server with `npx routelens dev` and open /__routelens on it ' +
+          '(or run `npx routelens` for a dashboard on its own port)',
       },
     ],
   };

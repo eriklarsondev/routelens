@@ -19,8 +19,8 @@ export interface ServeResult {
 
 /**
  * Run the dashboard on its own port, for when you would rather not touch your
- * app's server. Requests you fire from the dashboard are proxied to `target`
- * so they land on the real dev server.
+ * app's server. Its links point at `target`, so they open on the real dev
+ * server.
  */
 export async function serve(options: ServeOptions = {}): Promise<ServeResult> {
   const host = options.host ?? '127.0.0.1';

@@ -10,10 +10,12 @@ git clone <repo> && cd routelens
 npm install          # also runs the postinstall, which no-ops on this repo
 npm run build        # tsc -> dist/server, esbuild + Tailwind -> dist/client
 npm test             # builds, then runs every suite
-npm run lens         # build and open the dashboard pointed at this repo
+npm run lens         # build and serve the dashboard pointed at this repo
 ```
 
-Node 18 is the supported floor; development happens on Node 22.
+Node 18.18 is the supported floor; development happens on Node 22. CI runs every
+suite on Node 18, 20, 22 and 24 on Linux and Windows, plus macOS, and installs the
+packed tarball into a fresh project to check that every entry point resolves.
 
 ## The invariants
 
@@ -30,7 +32,9 @@ to change with it.
    stands down in CI and on deploy builds.
 4. **It writes one file, and only its own.** Auto-mount creates the dashboard
    route and gitignores it. It never overwrites a file it did not write, and
-   `routelens eject` removes exactly what it created.
+   `routelens eject` removes exactly what it created. `routelens init` also asks
+   the project's package manager to add routelens, which is what it was run
+   for; `routelens dev` writes nothing at all.
 5. **The dashboard loads nothing from the network.** No CDN, no webfont, no
    analytics. It must work offline and under a strict CSP.
 
@@ -43,17 +47,20 @@ server/              Node side — scanner, HTTP handlers, CLI
   walk.ts              file collection
   mask.ts              blanks out comments while preserving offsets
   paths.ts             path normalization and matching
-  detect/              one module per framework family
+  detect/              framework detectors, plus the shared middleware, page and link analysis
   scan.ts              orchestrates a scan into a ScanResult
-  core.ts              request handling, dev guard, file watching
-  middleware.ts        Connect/Express adapter
+  config.ts            project settings from routelens.config.json or package.json
+  core.ts              request handling, dev guard
+  watch.ts             re-scans when a source file changes
+  middleware.ts        routelens(): one initializer for Express, Koa, Hono, Fastify
   fetch-handler.ts     Request/Response adapter
   vite.ts              Vite plugin
-  auto/                postinstall wiring, eject, the --import preload
+  auto/                init and its package-manager commands, postinstall
+                       wiring, eject, the -r/--import preload behind `dev`
   cli.ts               routelens / list / json / mount / eject
 client/              Dashboard — React + shadcn/ui + Tailwind v4
   components/ui/       vendored shadcn source (committed, editable)
-test/                node:test suites and two fixture projects
+test/                node:test suites and their fixture projects
 scripts/             maintenance scripts, not shipped behaviour
 ```
 
@@ -65,8 +72,13 @@ one `:param` shape, then matches client calls against server routes.
 
 ### Adding support for a framework
 
-1. Add or extend a module in `server/detect/`. It takes a `ScannedFile` plus the
-   comment-masked text and returns `RawRoute[]`.
+1. Add or extend a module in `server/detect/`. A framework whose routes are
+   whole within one file (Next, NestJS, the file-routed ones) gets a detector
+   that takes a `ScannedFile` plus the comment-masked text and returns
+   `RawRoute[]`. One that mounts routers across files (Express, Koa, Hono,
+   Fastify, the Python frameworks) works in two passes: analyze each file,
+   then resolve the mounts across all of them (`analyzeNodeServer` and
+   `resolveNodeRoutes`, `analyzePython` and `resolvePythonRoutes`).
 2. Register it in `server/scan.ts`.
 3. Add a fixture under `test/fixtures/` — a realistic miniature of the
    framework, including at least one thing that should *not* be detected
@@ -95,16 +107,19 @@ place to look.
 
 There is no component library. The dashboard is a handful of plain components
 over Tailwind utilities, and React is the only framework dependency in the
-bundle. A new control is a `<button>` with classes on it — reach for a
-dependency only when real behaviour (focus trapping, positioning) demands one,
-and weigh it against the bundle every viewer downloads.
+bundle besides one Radix primitive: shadcn's Tooltip, in
+`client/components/ui/tooltip.tsx`, because placing a popup against the window
+edges is behaviour, not styling. Every tooltip goes through it (`<Tip>`), never
+a `title` attribute. A new control is a `<button>` with classes on it — reach
+for a dependency only when real behaviour (focus trapping, positioning) demands
+one, and weigh it against the bundle every viewer downloads.
 
 ### Checking the theme
 
 The light/dark/system toggle is driven by a real browser rather than a mock:
 
 ```bash
-npm run lens &                    # or: node dist/server/cli.js --port 4489 .
+npm run lens -- --port 4489 &     # or: node dist/server/cli.js --port 4489 .
 node scripts/check-theme.mjs http://127.0.0.1:4489/__routelens
 ```
 
@@ -121,17 +136,34 @@ node --test "test/scan.test.js"       # one suite
 Suites are plain `node:test` against the built output in `dist/`, so run
 `npm run build` first if you are not using `npm test`.
 
-### Testing auto-mount
+Express, Koa, Hono and Fastify are devDependencies for one reason:
+`test/initializer.test.js` drives `routelens()` through each of them, because
+what it has to get right is the shape each framework calls middleware with,
+and a stand-in would only test what we already believe about it. Fastify 5
+needs Node 20, so that test skips on 18.
 
-This one is easy to get wrong, because npm's behaviour differs between install
-kinds. Two things to know:
+### Testing init and auto-mount
+
+`routelens init` adds `routelens` from the registry, so to try a local build,
+install its tarball first; `init` then sees routelens is already a dependency
+and only wires it in:
+
+```bash
+npm pack
+cd /tmp/some-project
+npm install --save-dev /path/to/routelens-*.tgz
+npx routelens init
+```
+
+The postinstall is easy to get wrong, because npm's behaviour differs between
+install kinds. Two things to know:
 
 - **A `file:` dependency is symlinked and its lifecycle scripts do not run.**
   Test against a packed tarball instead:
   ```bash
   npm pack
   cd /tmp/some-next-project
-  npm install --save-dev /path/to/routelens-0.1.0.tgz --foreground-scripts
+  npm install --save-dev /path/to/routelens-*.tgz --foreground-scripts
   ```
 - **npm writes `package.json` after running `postinstall`.** On a first-ever
   install, routelens is not yet listed as a dependency, which is why the guard
@@ -142,7 +174,9 @@ swallows it otherwise.
 
 ## Conventions
 
-- TypeScript, strict, ESM everywhere. `.js` extensions on relative imports in
+- TypeScript, strict, ESM everywhere except `server/auto/preload.cjs`, which is
+  CommonJS so that both `-r` and `--import` can load it, and is copied into
+  `dist/` rather than compiled. `.js` extensions on relative imports in
   `server/` (NodeNext); the `@/` alias in `client/`.
 - Comments explain *why*, not *what*. If a regex or a guard looks arbitrary,
   the comment should say which real-world case forced it.
