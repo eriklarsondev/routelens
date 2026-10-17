@@ -5,6 +5,24 @@ All notable changes to routelens are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-10-17
+
+### Changed
+
+- The dev-dependency command is in the first code block of the README, beside
+  `npx routelens` and `routelens init`, rather than further down the Install
+  section. npm's package page renders a bare `npm i routelens` above the
+  README and offers no way to change it, so the correct command has to be
+  visible in the same glance.
+- The Dev only, read only section leads with what routelens does rather than
+  with what exposing it would cost: it reads source files the way a linter
+  does, and nothing it finds leaves the machine. The guarantees themselves are
+  unchanged — four layers keeping it out of a deploy, no request to a user's
+  endpoint, and no connection to anything but `127.0.0.1` to find the dev
+  server's port.
+
+Documentation only — the published code is identical to 0.3.0.
+
 ## [0.3.1] - 2026-10-17
 
 ### Changed
@@ -332,7 +350,8 @@ First release.
 - "Open source" refuses any path that escapes the scan root.
 - No runtime dependencies, and the dashboard loads no third-party assets.
 
-[Unreleased]: https://github.com/eriklarsondev/routelens/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/eriklarsondev/routelens/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/eriklarsondev/routelens/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/eriklarsondev/routelens/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/eriklarsondev/routelens/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/eriklarsondev/routelens/compare/v0.1.0...v0.2.0
