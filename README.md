@@ -2,11 +2,13 @@
 
 See every URL in your app on one page — the endpoints your **server** answers and the pages your **client** serves — with one click to open any of them.
 
-```
-npx routelens
+```bash
+npx routelens                     # try it now — nothing installed
+npx routelens init                # add to devDependencies, wire up the dashboard
+npm install --save-dev routelens  # or add it yourself
 ```
 
-Then open <http://localhost:4477/__routelens>. Or run `npx routelens init` to put it on your own dev server, at `/__routelens`.
+Then open <http://localhost:4477/__routelens> — or `/__routelens` on your own dev server, once `init` has wired it up.
 
 It works the way a linter does: it reads your source files and never runs them. Everything it finds stays on your machine — there is no account, no telemetry, and no connection to anything but `127.0.0.1`, which it checks only to find the port your dev server is on. It never sends a request to one of your endpoints, and the one route it adds to your app is its own dashboard.
 
