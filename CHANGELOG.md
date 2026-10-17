@@ -5,6 +5,21 @@ All notable changes to routelens are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-10-17
+
+### Changed
+
+- The Install section spells out the dev-dependency command for npm, pnpm,
+  Yarn and Bun, and says why routelens belongs in `devDependencies` rather
+  than `dependencies`. npm's package page offers a bare `npm i routelens`,
+  which installs it as a runtime dependency of a project that ships to
+  production — exactly where routelens refuses to run.
+- `ROUTELENS_DEBUG=1` is documented: it reports why the postinstall skipped a
+  project, and why `routelens/auto` stood down, both of which are silent by
+  design.
+
+Documentation only — the published code is identical to 0.3.0.
+
 ## [0.3.0] - 2026-10-17
 
 ### Added
@@ -317,7 +332,8 @@ First release.
 - "Open source" refuses any path that escapes the scan root.
 - No runtime dependencies, and the dashboard loads no third-party assets.
 
-[Unreleased]: https://github.com/eriklarsondev/routelens/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/eriklarsondev/routelens/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/eriklarsondev/routelens/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/eriklarsondev/routelens/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/eriklarsondev/routelens/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/eriklarsondev/routelens/releases/tag/v0.1.0
