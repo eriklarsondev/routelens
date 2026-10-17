@@ -44,7 +44,18 @@ That one command adds routelens to your devDependencies with the package manager
 
 `npx routelens init --dry-run` says what it would do first.
 
-A plain `npm install --save-dev routelens` works too: on npm, its postinstall does the same Next.js wiring. pnpm, Bun, `--ignore-scripts` and `file:` installs skip install scripts, which is why `init` does the wiring itself. The postinstall can be turned off with `ROUTELENS_NO_AUTO=1`, or `"routelens": { "autoMount": false }` in your package.json, and it is skipped automatically whenever `NODE_ENV=production`, `CI` is set, dev dependencies are omitted, or a deploy build is detected. Skipping is silent by design; `ROUTELENS_DEBUG=1` makes it say which of those it hit, and makes `routelens/auto` report when it stands down too.
+### Installing it by hand
+
+routelens is a dev tool — it maps your whole API surface and refuses to run in production, so install it as a **dev dependency**, never a regular one:
+
+```bash
+npm install --save-dev routelens
+pnpm add -D routelens
+yarn add -D routelens
+bun add -d routelens
+```
+
+On npm, the postinstall does the same Next.js wiring. pnpm, Bun, `--ignore-scripts` and `file:` installs skip install scripts, which is why `init` does the wiring itself. The postinstall can be turned off with `ROUTELENS_NO_AUTO=1`, or `"routelens": { "autoMount": false }` in your package.json, and it is skipped automatically whenever `NODE_ENV=production`, `CI` is set, dev dependencies are omitted, or a deploy build is detected. Skipping is silent by design; `ROUTELENS_DEBUG=1` makes it say which of those it hit, and makes `routelens/auto` report when it stands down too.
 
 ## Use it
 
