@@ -1,6 +1,6 @@
 {
   "name": "routelens",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "See every URL in your app: the endpoints your server answers, the pages your client serves, and the calls between them, one click from opening any of them.",
   "keywords": [
     "routes",
