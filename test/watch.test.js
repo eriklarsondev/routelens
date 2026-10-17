@@ -37,6 +37,13 @@ for (const recursive of [true, false]) {
     const watcher = watchProject(root, {}, () => changes++, { recursive });
     assert.ok(watcher, 'watching');
 
+    // A recursive watch is an FSEvents stream on macOS, and the stream takes a
+    // moment to arm. A write landing inside that window is never reported at
+    // all — not late, never — and arming is slowest when several streams start
+    // at once, which is exactly what the parallel test runner does. Settle
+    // before the first write, or this races roughly once in forty runs.
+    await pause(300);
+
     try {
       const changedAfter = async (write) => {
         const before = changes;

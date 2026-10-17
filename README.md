@@ -8,7 +8,7 @@ npx routelens
 
 Then open <http://localhost:4477/__routelens>. Or run `npx routelens init` to put it on your own dev server, at `/__routelens`.
 
-routelens reads your source code. It does not run it, and it never sends a request to one of your endpoints. The only route it ever adds to your app is its own dashboard.
+It works the way a linter does: it reads your source files and never runs them. Everything it finds stays on your machine — there is no account, no telemetry, and no connection to anything but `127.0.0.1`, which it checks only to find the port your dev server is on. It never sends a request to one of your endpoints, and the one route it adds to your app is its own dashboard.
 
 The dashboard is a React app built with Tailwind, bundled at publish time into two static files that routelens serves itself — so **nothing is added to your dependency tree**, there is no CDN request, and the page works offline and under a strict CSP. It follows your system theme and has a light/dark/system toggle that remembers your choice.
 
@@ -46,7 +46,7 @@ That one command adds routelens to your devDependencies with the package manager
 
 ### Installing it by hand
 
-routelens is a dev tool — it maps your whole API surface and refuses to run in production, so install it as a **dev dependency**, never a regular one:
+routelens belongs in `devDependencies`, alongside your test runner and your bundler — it is only useful while you are building, and it refuses to start in production:
 
 ```bash
 npm install --save-dev routelens
@@ -106,7 +106,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 ```
 
-Unlike `cors`, it stays behind that `NODE_ENV` check. routelens is a devDependency, so it is not installed on a production server, and it refuses to start in production anyway: it maps your whole API, which is not something to serve from a deployed app (see [Dev only, read only](#dev-only-read-only)).
+Unlike `cors`, it stays behind that `NODE_ENV` check. routelens is a devDependency, so it is not installed on a production server, and it refuses to start there anyway: like your dev server, it is part of your local toolchain and has no job in a deployed app (see [Dev only, read only](#dev-only-read-only)).
 
 From CommonJS, on Node 20.19+ or 22.12+ (which can `require` an ES module):
 
@@ -174,7 +174,7 @@ assert.deepEqual(result.brokenLinks, [], 'links must land on a real page');
 
 ## Dev only, read only
 
-routelens maps your entire API surface, so exposing it publicly hands an attacker a free map. Four layers keep it out of production:
+The dashboard is for the person building the app, so routelens confines itself to development the way your dev server does — and it does not rely on you remembering. Four independent layers keep it out of a deploy:
 
 - **The generated route file is gitignored**, so it is never committed and never deployed. It exists only on machines that ran `routelens init`, or `npm install` with dev dependencies.
 - **That file checks `NODE_ENV` itself** and answers 404 in production, even if something does ship it.
