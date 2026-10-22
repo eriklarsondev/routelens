@@ -25,9 +25,9 @@ coverage/
 .nyc_output/
 *.lcov
 
-# Dashboards routelens generated while testing `routelens mount` against the
-# fixture projects. They are a consumer-side artifact, never repo source.
-test/fixtures/**/__routelens/
+# Servers test/mount.test.js pastes snippets into and runs. Removed after
+# each test; ignored in case a run is cut short.
+test/.mount-*/
 
 # Local environment
 .env

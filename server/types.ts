@@ -327,10 +327,18 @@ export interface RouteLensOptions extends ScanOptions {
   /** Re-scan when files change. Defaults to true. */
   watch?: boolean;
   /**
-   * Allow running outside development. routelens is a dev tool and refuses to
-   * start when `NODE_ENV === 'production'` unless this is explicitly `true`.
+   * Allow running outside development. routelens is a dev tool: it refuses to
+   * start unless NODE_ENV is `development`, `local` or unset, and only `true`
+   * here overrides that.
    */
   allowInProduction?: boolean;
+  /**
+   * Host names the dashboard answers besides localhost, private IP addresses
+   * and single-label names (a Docker service). `.example.com` allows the domain
+   * and its subdomains; `true` allows any — which gives up the protection
+   * against DNS rebinding. The Vite plugin uses Vite's `server.allowedHosts`.
+   */
+  allowedHosts?: string[] | true;
   /** Enable the "open in editor" button. Defaults to true. */
   openInEditor?: boolean;
   /**

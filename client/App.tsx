@@ -35,6 +35,16 @@ export function App() {
     void load(false);
   }, [load]);
 
+  // Mounted on a client app, the dashboard has pages and no endpoints: it opens
+  // on what it has rather than on an empty tab. Only once, so a later re-scan
+  // never moves someone off the tab they chose.
+  const [landed, setLanded] = useState(false);
+  useEffect(() => {
+    if (!data || landed) return;
+    setLanded(true);
+    if (data.routes.length === 0 && data.pages.length > 0) setTab('client');
+  }, [data, landed]);
+
   // The server watches the project and pings when a scanned file changes.
   useEffect(() => onFileChange(() => void load(true)), [load]);
 

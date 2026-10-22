@@ -7,7 +7,7 @@ is meant to stay that way.
 
 ```bash
 git clone <repo> && cd routelens
-npm install          # also runs the postinstall, which no-ops on this repo
+npm install
 npm run build        # tsc -> dist/server, esbuild + Tailwind -> dist/client
 npm test             # builds, then runs every suite
 npm run lens         # build and serve the dashboard pointed at this repo
@@ -28,14 +28,21 @@ to change with it.
    ships is compiled JS plus two static assets.
 2. **Read only.** routelens never sends a request to a user's endpoint. The
    dashboard links and copies; it does not fire. There is no proxy.
-3. **Dev only.** Nothing runs under `NODE_ENV=production`. Auto-mount also
-   stands down in CI and on deploy builds.
-4. **It writes one file, and only its own.** Auto-mount creates the dashboard
-   route and gitignores it. It never overwrites a file it did not write, and
-   `routelens eject` removes exactly what it created. `routelens init` also asks
-   the project's package manager to add routelens, which is what it was run
-   for; `routelens dev` writes nothing at all.
-5. **The dashboard loads nothing from the network.** No CDN, no webfont, no
+3. **Dev only.** The dashboard starts only where `NODE_ENV` is `development`,
+   `local` or unset — an allowlist, so staging and test are out too — and every
+   snippet `routelens mount` prints checks the same before loading anything.
+   The Vite plugin stands aside outside development rather than throwing,
+   because Vitest runs a Vite server under `NODE_ENV=test`.
+4. **It writes nothing, and mounts nothing by itself.** No install script, no
+   generated file, no hook into a process. A dashboard is on a server only
+   where that server's code puts it: `routelens mount` prints the code and
+   never writes it.
+5. **It answers its own page.** `server/guard.ts` refuses hosts that are not
+   local (DNS rebinding), keeps the scan and `/open` from pages on other sites,
+   strips an app's `cors()` from dashboard answers, and opens files only for
+   the machine the server runs on. A new route on the dashboard goes through
+   the same guard.
+6. **The dashboard loads nothing from the network.** No CDN, no webfont, no
    analytics. It must work offline and under a strict CSP.
 
 There are tests for every one of these. If you find a gap, that is a bug.
@@ -50,14 +57,15 @@ server/              Node side — scanner, HTTP handlers, CLI
   detect/              framework detectors, plus the shared middleware, page and link analysis
   scan.ts              orchestrates a scan into a ScanResult
   config.ts            project settings from routelens.config.json or package.json
-  core.ts              request handling, dev guard
+  core.ts              request handling, and the local-and-dev check
+  guard.ts             who the dashboard answers: hosts, sites, this machine
   watch.ts             re-scans when a source file changes
   middleware.ts        routelens(): one initializer for Express, Koa, Hono, Fastify
+  index.cjs            require('routelens') where Node cannot require an ES module
   fetch-handler.ts     Request/Response adapter
   vite.ts              Vite plugin
-  auto/                init and its package-manager commands, postinstall
-                       wiring, eject, the -r/--import preload behind `dev`
-  cli.ts               routelens / list / json / mount / eject
+  snippet.ts           what `routelens mount` prints, one stack at a time
+  cli.ts               routelens / list / json / mount
 client/              Dashboard — React + shadcn/ui + Tailwind v4
   components/ui/       vendored shadcn source (committed, editable)
 test/                node:test suites and their fixture projects
@@ -142,41 +150,41 @@ what it has to get right is the shape each framework calls middleware with,
 and a stand-in would only test what we already believe about it. Fastify 5
 needs Node 20, so that test skips on 18.
 
-### Testing init and auto-mount
+### Testing the mount snippets
 
-`routelens init` adds `routelens` from the registry, so to try a local build,
-install its tarball first; `init` then sees routelens is already a dependency
-and only wires it in:
+What `routelens mount` prints has to work once pasted, so `test/mount.test.js`
+pastes it: each snippet goes into a real Express, Fastify and Koa server (an
+ES module, CommonJS, and an app built inside a plain function), and each
+Next.js route file is compiled with esbuild and called. Every one must serve
+the dashboard under `NODE_ENV` unset, `development` and `local`, and must not
+under `production`, `test` and `staging`. The servers are written into
+`test/.mount-*` so `routelens` and the frameworks resolve as they would in a
+project that installed them; the directories are removed afterwards.
+
+`require('routelens')` takes one of two paths in `server/index.cjs`: the whole
+module where Node can `require` an ES module (20.19+, 22.12+), and a
+middleware that loads it with `import()` elsewhere. The suite runs both, the
+second with `--no-experimental-require-module`.
+
+To try a local build in a real project, install its tarball and paste:
 
 ```bash
 npm pack
-cd /tmp/some-project
+cd /path/to/some-project
 npm install --save-dev /path/to/routelens-*.tgz
-npx routelens init
+npx routelens mount
 ```
 
-The postinstall is easy to get wrong, because npm's behaviour differs between
-install kinds. Two things to know:
-
-- **A `file:` dependency is symlinked and its lifecycle scripts do not run.**
-  Test against a packed tarball instead:
-  ```bash
-  npm pack
-  cd /tmp/some-next-project
-  npm install --save-dev /path/to/routelens-*.tgz --foreground-scripts
-  ```
-- **npm writes `package.json` after running `postinstall`.** On a first-ever
-  install, routelens is not yet listed as a dependency, which is why the guard
-  in `server/auto/postinstall.ts` also accepts a top-level install location.
-
-`--foreground-scripts` is required to see postinstall output at all; npm
-swallows it otherwise.
+Snippets for Next.js are worth checking against a real `next dev` and
+`next build` whenever they change: the App Router never routes a folder that
+starts with `_`, which is why the route lives under `%5F%5Froutelens`.
 
 ## Conventions
 
-- TypeScript, strict, ESM everywhere except `server/auto/preload.cjs`, which is
-  CommonJS so that both `-r` and `--import` can load it, and is copied into
-  `dist/` rather than compiled. `.js` extensions on relative imports in
+- TypeScript, strict, ESM everywhere except `server/index.cjs`, which is
+  CommonJS so that `require('routelens')` works where Node cannot require an
+  ES module, and is copied into `dist/` rather than compiled — compiling it
+  would turn its `import()` into `require`. `.js` extensions on relative imports in
   `server/` (NodeNext); the `@/` alias in `client/`.
 - Comments explain *why*, not *what*. If a regex or a guard looks arbitrary,
   the comment should say which real-world case forced it.

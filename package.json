@@ -34,6 +34,7 @@
   "exports": {
     ".": {
       "types": "./dist/server/index.d.ts",
+      "require": "./dist/server/index.cjs",
       "default": "./dist/server/index.js"
     },
     "./fetch": {
@@ -48,12 +49,7 @@
       "types": "./dist/server/scan.d.ts",
       "default": "./dist/server/scan.js"
     },
-    "./package.json": "./package.json",
-    "./auto": "./dist/server/auto/preload.cjs",
-    "./wire": {
-      "types": "./dist/server/auto/wire.d.ts",
-      "default": "./dist/server/auto/wire.js"
-    }
+    "./package.json": "./package.json"
   },
   "bin": {
     "routelens": "./dist/server/cli.js"
@@ -75,8 +71,7 @@
     "dev": "tsc --watch",
     "prepublishOnly": "npm run typecheck && npm test",
     "test": "npm run build && node scripts/test.mjs",
-    "lens": "npm run build && node dist/server/cli.js",
-    "postinstall": "node -e \"import('./dist/server/auto/postinstall.js').catch(()=>{})\""
+    "lens": "npm run build && node dist/server/cli.js"
   },
   "devDependencies": {
     "@radix-ui/react-tooltip": "^1.4.0",

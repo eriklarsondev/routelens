@@ -59,10 +59,12 @@ jobs:
             import { routelens } from 'routelens';
             import { createRouteLensHandler } from 'routelens/fetch';
             import { routelensVite } from 'routelens/vite';
-            import { planWiring } from 'routelens/wire';
-            for (const fn of [routelens, createRouteLensHandler, routelensVite, planWiring]) {
+            for (const fn of [routelens, createRouteLensHandler, routelensVite]) {
               if (typeof fn !== 'function') process.exit(1);
             }
           "
-          node -r routelens/auto -e "process.exit(0)"
-          node --import routelens/auto -e "process.exit(0)"
+          node -e "if (typeof require('routelens').routelens !== 'function') process.exit(1)"
+          npx routelens mount "$GITHUB_WORKSPACE/test/fixtures/demo" > /dev/null
+          # Installing must leave the project exactly as it was: no file, no script.
+          test -z "$(git -C "$GITHUB_WORKSPACE" status --porcelain)"
+          test "$(LC_ALL=C ls -A)" = "$(printf 'node_modules\npackage-lock.json\npackage.json')"

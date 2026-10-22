@@ -91,6 +91,7 @@ test('Hono: app.use(routelens())', async () => {
     assert.ok((await (await app.request('/__routelens/data')).json()).routes.length > 0);
     const open = await app.request('/__routelens/open', {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ file: '../outside.js', line: 1 }),
     });
     assert.match((await open.json()).error, /escapes the project root/);

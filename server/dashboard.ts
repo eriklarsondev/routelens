@@ -41,6 +41,9 @@ export function assetContentType(kind: AssetKind): string {
 
 /** The HTML shell. Everything else is rendered by the React app. */
 export function renderDashboard(basePath: string): string {
+  const href = basePath.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+  // `<` is what could end the script early; a JSON string never needs it raw.
+  const base = JSON.stringify(basePath).replaceAll('<', '\\u003c');
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -49,13 +52,13 @@ export function renderDashboard(basePath: string): string {
 <meta name="robots" content="noindex, nofollow" />
 <title>routelens</title>
 <link rel="icon" href="data:image/svg+xml,${FAVICON}" />
-<link rel="stylesheet" href="${basePath}/app.css" />
+<link rel="stylesheet" href="${href}/app.css" />
 <script>${THEME_BOOTSTRAP}</script>
 </head>
 <body>
 <div id="root"></div>
-<script>window.__ROUTELENS_BASE__ = ${JSON.stringify(basePath)};</script>
-<script src="${basePath}/app.js" defer></script>
+<script>window.__ROUTELENS_BASE__ = ${base};</script>
+<script src="${href}/app.js" defer></script>
 <noscript>routelens needs JavaScript. Use <code>npx routelens list</code> for a terminal listing.</noscript>
 </body>
 </html>`;

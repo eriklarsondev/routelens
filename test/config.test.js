@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -6,7 +8,7 @@ import { scan } from '../dist/server/scan.js';
 
 /**
  * A project's own settings, from routelens.config.json or package.json — the
- * only way to reach the CLI and auto-mount, which take no options in code.
+ * only way to reach the CLI, which takes no options in code.
  */
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'config');
@@ -33,7 +35,6 @@ test('routelens.config.json says what middleware names mean, and names the HTTP 
 test('the same settings can live under "routelens" in package.json', () => {
   const result = scan({ root: join(fixtures, 'package') });
   assert.equal(result.config, 'package.json#routelens');
-  // `autoMount` shares the key; it is the install step's setting, not a mistake.
   assert.deepEqual(result.warnings, []);
   assert.deepEqual(kinds(result), { 'GET /api/me': ['auth whoami'] });
 });
@@ -77,4 +78,13 @@ test('a call whose origin is an expression is broken when its path is shaped lik
     result.unmatchedCalls.map((call) => `${call.method} ${call.path}`),
     ['GET /api/archived-items'],
   );
+});
+
+test('the retired autoMount setting says to remove it', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'routelens-config-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'demo', routelens: { autoMount: false } }));
+  assert.deepEqual(scan({ root }).warnings, [
+    'package.json#routelens: "autoMount" does nothing since routelens stopped mounting itself — remove it',
+  ]);
 });

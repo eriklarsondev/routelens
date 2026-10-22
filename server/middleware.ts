@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createLens, type Lens } from './core.js';
+import { createLens, type Lens, type LensRequest, type LensResponse } from './core.js';
 import { respondTo } from './fetch-handler.js';
 import type { RouteLensOptions } from './types.js';
 
@@ -38,13 +38,14 @@ export interface RouteLensMiddleware {
 
 /**
  * The dashboard as middleware, one initializer for every Node framework. Mount
- * it on your dev server and open `/__routelens`:
+ * it in your main server file, inside the local-and-dev check, and open
+ * `/__routelens` (`npx routelens mount` prints this for your project):
  *
  * ```js
- * if (process.env.NODE_ENV !== 'production') {
+ * if (!process.env.NODE_ENV || process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'local') {
  *   const { routelens } = await import('routelens');
- *   app.use(routelens());         // Express, Connect, Koa, Hono
- *   // fastify.register(routelens());
+ *   app.use(routelens());         // Express, Connect, NestJS, Koa, Hono
+ *   // app.register(routelens()); // Fastify
  * }
  * ```
  *
@@ -62,7 +63,9 @@ export function routelens(options: RouteLensOptions = {}): RouteLensMiddleware {
     const search = questionMark === -1 ? '' : url.slice(questionMark + 1);
 
     if (lens.isEventStream(path)) {
-      streamEvents(lens, request, response);
+      const refusal = lens.guard(describe(request, path));
+      if (refusal) send(request, response, refusal);
+      else streamEvents(lens, request, response);
       return;
     }
 
@@ -73,13 +76,12 @@ export function routelens(options: RouteLensOptions = {}): RouteLensMiddleware {
 
     readBody(request)
       .then(async (body) => {
-        const result = await lens.handle({ method: request.method ?? 'GET', path, search, body });
+        const result = await lens.handle({ ...describe(request, path), search, body });
         if (!result) {
           next();
           return;
         }
-        response.writeHead(result.status, result.headers);
-        response.end(request.method === 'HEAD' ? undefined : result.body);
+        send(request, response, result);
       })
       .catch(next);
   };
@@ -157,16 +159,46 @@ export function routelens(options: RouteLensOptions = {}): RouteLensMiddleware {
   return middleware;
 }
 
+/** What the guard needs to know about a Node request: who it is for, and where it came from. */
+function describe(request: IncomingMessage, path: string): LensRequest {
+  return {
+    method: request.method ?? 'GET',
+    path,
+    headers: request.headers,
+    remoteAddress: request.socket?.remoteAddress,
+    localAddress: request.socket?.localAddress,
+  };
+}
+
+function send(request: IncomingMessage, response: ServerResponse, result: LensResponse): void {
+  dropCors(response);
+  response.writeHead(result.status, result.headers);
+  response.end(request.method === 'HEAD' ? undefined : result.body);
+}
+
 function pathOf(url: string | undefined): string {
   const value = url ?? '/';
   const questionMark = value.indexOf('?');
   return questionMark === -1 ? value : value.slice(0, questionMark);
 }
 
+/**
+ * A `cors()` earlier in the app's chain may already have allowed every origin
+ * on this response. That was meant for the app's API, never for the dashboard,
+ * so it is taken back.
+ */
+function dropCors(response: ServerResponse): void {
+  for (const name of response.getHeaderNames()) {
+    if (name.startsWith('access-control-')) response.removeHeader(name);
+  }
+}
+
 function streamEvents(lens: Lens, request: IncomingMessage, response: ServerResponse): void {
+  dropCors(response);
   response.writeHead(200, {
     'content-type': 'text/event-stream',
     'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
     connection: 'keep-alive',
   });
   response.write('event: ready\ndata: {}\n\n');

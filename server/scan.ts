@@ -290,22 +290,32 @@ export function scan(given: ScanOptions = {}): ScanResult {
   // A URL whose origin is an expression — `${BASE_URL}/api/users` — may be
   // another service's; it is this server's when its path starts the way this
   // server's own routes do.
+  //
+  // A scan that sees one side of the app cannot judge the other. A client
+  // whose server lives elsewhere calls nothing that is here, and a server
+  // whose clients live elsewhere is called by nothing that is — the normal
+  // case for a dashboard mounted on one stack of a monolith, whose server's
+  // own calls go to other services. So neither side is judged until the scan
+  // shows the two talking: at least one call that reaches a route here.
   const servedPrefixes = new Set(deduped.filter((route) => route.mounted).map((route) => firstSegment(route.path)));
   servedPrefixes.delete('');
-  const unmatchedCalls = dedupedCalls.filter(
-    (call) =>
-      !call.routeId &&
-      !call.host &&
-      !call.path.includes('*') &&
-      (!call.dynamic || (call.originUnknown && servedPrefixes.has(firstSegment(call.path)))) &&
-      call.library !== 'literal' &&
-      !servedPages.some((page) => pathMatches(page.path, call.path)),
-  );
+  const connected = dedupedCalls.some((call) => call.routeId);
+  const unmatchedCalls = !connected
+    ? []
+    : dedupedCalls.filter(
+        (call) =>
+          !call.routeId &&
+          !call.host &&
+          !call.path.includes('*') &&
+          (!call.dynamic || (call.originUnknown && servedPrefixes.has(firstSegment(call.path)))) &&
+          call.library !== 'literal' &&
+          !servedPages.some((page) => pathMatches(page.path, call.path)),
+      );
   const unmountedRoutes = deduped.filter((route) => !route.mounted);
 
   // An unmounted route is not reported as uncalled as well: nothing can call a
   // handler that answers at no URL, so saying so twice adds nothing.
-  const uncalledRoutes = deduped.filter((route) => route.mounted && route.callers.length === 0);
+  const uncalledRoutes = connected ? deduped.filter((route) => route.mounted && route.callers.length === 0) : [];
 
   const routers = new Set<ClientRouter>();
   for (const page of dedupedPages) {

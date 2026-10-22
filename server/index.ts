@@ -1,5 +1,5 @@
 export { scan } from './scan.js';
-export { createLens, isProductionLike, DEFAULT_BASE_PATH } from './core.js';
+export { createLens, isDevelopment, DEFAULT_BASE_PATH } from './core.js';
 export type { Lens, LensRequest, LensResponse } from './core.js';
 export { routelens } from './middleware.js';
 export type { RouteLensMiddleware } from './middleware.js';

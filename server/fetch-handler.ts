@@ -1,4 +1,4 @@
-import { createLens, type Lens } from './core.js';
+import { createLens, type Lens, type LensRequest } from './core.js';
 import type { RouteLensOptions } from './types.js';
 
 export interface FetchHandler {
@@ -10,12 +10,19 @@ export interface FetchHandler {
  * Web-standard handler for frameworks that speak `Request`/`Response`
  * (Next.js App Router, Hono, Remix, SvelteKit, Bun, Deno).
  *
- * Next.js — `app/__routelens/[[...path]]/route.ts`:
+ * Next.js — `app/%5F%5Froutelens/[[...path]]/route.ts` (`%5F` is an escaped
+ * underscore: a folder starting with `_` is private and never routed). The
+ * check folds to `false` in `next build`, which leaves routelens out of it:
  * ```ts
- * import { createRouteLensHandler } from 'routelens/fetch';
- * const handler = createRouteLensHandler({ basePath: '/__routelens' });
- * export const GET = handler;
- * export const POST = handler;
+ * export const dynamic = 'force-dynamic';
+ * const lens =
+ *   process.env.NODE_ENV === 'development'
+ *     ? import('routelens/fetch').then(({ createRouteLensHandler }) => createRouteLensHandler())
+ *     : null;
+ * export async function GET(request: Request) {
+ *   return lens ? (await lens)(request) : new Response('Not found', { status: 404 });
+ * }
+ * export const POST = GET;
  * ```
  */
 export function createRouteLensHandler(options: RouteLensOptions = {}): FetchHandler {
@@ -42,19 +49,25 @@ export function createRouteLensHandler(options: RouteLensOptions = {}): FetchHan
  */
 export async function respondTo(lens: Lens, request: Request): Promise<Response | null> {
   const url = new URL(request.url);
+  const headers: LensRequest['headers'] = Object.fromEntries(request.headers);
+  // Servers build a Request's URL from the Host it arrived with; one built in
+  // code (`app.fetch(new Request(url))`) has only the URL to say it.
+  headers.host ??= url.host;
+  const described: LensRequest = {
+    method: request.method,
+    path: url.pathname,
+    // A web Request carries no socket, so who sent it is down to its headers.
+    headers,
+  };
 
   if (lens.isEventStream(url.pathname)) {
-    return eventStream(lens);
+    const refusal = lens.guard(described);
+    return refusal ? new Response(refusal.body, { status: refusal.status, headers: refusal.headers }) : eventStream(lens);
   }
 
   const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
 
-  const result = await lens.handle({
-    method: request.method,
-    path: url.pathname,
-    search: url.search,
-    body,
-  });
+  const result = await lens.handle({ ...described, search: url.search, body });
   if (!result) return null;
 
   return new Response(request.method === 'HEAD' ? null : result.body, {
@@ -87,6 +100,7 @@ function eventStream(lens: Lens): Response {
     headers: {
       'content-type': 'text/event-stream',
       'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
       connection: 'keep-alive',
     },
   });

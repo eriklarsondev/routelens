@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -145,4 +147,41 @@ test('respects includePages: false', () => {
   const apiOnly = scan({ root, includePages: false });
   assert.deepEqual(apiOnly.pages, []);
   assert.equal(apiOnly.routes.length, result.routes.length, 'server routes are unaffected');
+});
+
+test('a scan that sees one stack does not judge the other', (t) => {
+  const project = (files) => {
+    const dir = mkdtempSync(join(tmpdir(), 'routelens-stack-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    for (const [path, contents] of Object.entries(files)) {
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      writeFileSync(join(dir, path), contents);
+    }
+    return dir;
+  };
+  const server = {
+    'server/index.js':
+      "const express = require('express');\nconst app = express();\n" +
+      "app.get('/api/users', (req, res) => res.json([]));\napp.get('/api/reports', (req, res) => res.json([]));\n" +
+      // The server's own call to another service, as servers make.
+      "async function token() { return fetch(`${process.env.PAYMENTS_URL}/oauth/token`, { method: 'POST' }); }\n" +
+      'app.listen(3000);\n',
+  };
+  const client = {
+    'client/src/api.js': "export const users = () => fetch('/api/users');\nexport const typo = () => fetch('/api/userz');\n",
+  };
+
+  // Mounted on the server alone, nothing here calls its routes — it says nothing about that.
+  const serverOnly = scan({ root: project(server) });
+  assert.equal(serverOnly.routes.length, 2);
+  assert.deepEqual(serverOnly.uncalledRoutes, []);
+  assert.deepEqual(serverOnly.unmatchedCalls, []);
+
+  // Mounted on the client alone, its server is elsewhere — nor about that.
+  assert.deepEqual(scan({ root: project(client) }).unmatchedCalls, []);
+
+  // With both in view, both are judged.
+  const both = scan({ root: project({ ...server, ...client }) });
+  assert.deepEqual(both.unmatchedCalls.map((call) => call.path), ['/api/userz']);
+  assert.deepEqual(both.uncalledRoutes.map((route) => route.path), ['/api/reports']);
 });

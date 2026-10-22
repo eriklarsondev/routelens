@@ -1,19 +1,24 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { isAbsolute, join, normalize, resolve } from 'node:path';
+import { isAbsolute, resolve, sep } from 'node:path';
+
+export interface OpenOutcome {
+  ok: boolean;
+  error?: string;
+}
 
 /**
  * Open a scanned file in the developer's editor. The command comes from
  * `ROUTELENS_EDITOR` or `EDITOR`, and may contain `{file}` / `{line}`
  * placeholders. Anything else is assumed to speak VS Code's `-g file:line`.
  */
-export function openInEditor(root: string, file: string, line: number): { ok: boolean; error?: string } {
+export async function openInEditor(root: string, file: string, line: number): Promise<OpenOutcome> {
   const safe = safeJoin(root, file);
   if (!safe) return { ok: false, error: 'Path escapes the project root' };
   if (!existsSync(safe)) return { ok: false, error: 'File no longer exists' };
 
   const configured = process.env.ROUTELENS_EDITOR || process.env.EDITOR || defaultEditor();
-  const target = `${safe}:${Math.max(1, line)}`;
+  const lineNumber = String(Math.max(1, Math.trunc(line)));
 
   let command: string;
   let args: string[];
@@ -21,23 +26,16 @@ export function openInEditor(root: string, file: string, line: number): { ok: bo
   if (configured.includes('{file}')) {
     const parts = configured
       .split(/\s+/)
-      .map((part) => part.replaceAll('{file}', safe).replaceAll('{line}', String(line)));
+      .map((part) => part.replaceAll('{file}', safe).replaceAll('{line}', lineNumber));
     command = parts[0]!;
     args = parts.slice(1);
   } else {
     const parts = configured.split(/\s+/);
     command = parts[0]!;
-    args = [...parts.slice(1), '-g', target];
+    args = [...parts.slice(1), '-g', `${safe}:${lineNumber}`];
   }
 
-  try {
-    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
-    child.on('error', () => {});
-    child.unref();
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: `Could not run \`${command}\`. Set ROUTELENS_EDITOR.` };
-  }
+  return launch(command, args);
 }
 
 function defaultEditor(): string {
@@ -46,10 +44,56 @@ function defaultEditor(): string {
   return 'code';
 }
 
-/** Resolve `file` inside `root`, refusing anything that climbs out. */
-function safeJoin(root: string, file: string): string | null {
+/** Resolve `file` inside `root`, refusing anything that climbs out — including into a sibling named like it. */
+export function safeJoin(root: string, file: string): string | null {
   if (isAbsolute(file)) return null;
   const resolvedRoot = resolve(root);
-  const candidate = normalize(join(resolvedRoot, file));
-  return candidate.startsWith(resolvedRoot) ? candidate : null;
+  const candidate = resolve(resolvedRoot, file);
+  return candidate.startsWith(resolvedRoot + sep) ? candidate : null;
+}
+
+/**
+ * Start the editor and say whether it ran. Editors on Windows install as `.cmd`
+ * shims (`code.cmd`), which only `cmd.exe` can start, so there the command line
+ * goes through it with every part quoted — and a part holding what `cmd.exe`
+ * expands even inside quotes is refused rather than escaped.
+ */
+function launch(command: string, args: string[]): Promise<OpenOutcome> {
+  const failed: OpenOutcome = { ok: false, error: `Could not run \`${command}\`. Set ROUTELENS_EDITOR.` };
+
+  let child: ChildProcess;
+  try {
+    if (process.platform === 'win32') {
+      const parts = [command, ...args];
+      if (parts.some((part) => /["%!\r\n]/.test(part))) {
+        return Promise.resolve({ ok: false, error: 'The path holds a character cmd.exe would expand' });
+      }
+      child = spawn(parts.map((part) => `"${part}"`).join(' '), {
+        shell: true,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+    } else {
+      child = spawn(command, args, { detached: true, stdio: 'ignore' });
+    }
+  } catch {
+    return Promise.resolve(failed);
+  }
+
+  // Editor launchers hand the file over and exit. One still running after a
+  // moment is an editor that stays open, which is a success too.
+  return new Promise((resolveOutcome) => {
+    let settled = false;
+    const settle = (outcome: OpenOutcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.unref();
+      resolveOutcome(outcome);
+    };
+    const timer = setTimeout(() => settle({ ok: true }), 1500);
+    child.once('error', () => settle(failed));
+    child.once('exit', (code) => settle(code === 0 ? { ok: true } : failed));
+  });
 }

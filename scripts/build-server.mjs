@@ -20,9 +20,10 @@ const tsc = spawnSync(process.execPath, [require.resolve('typescript/bin/tsc')],
 });
 if (tsc.status !== 0) process.exit(tsc.status ?? 1);
 
-// The preload is CommonJS by design — the one format both `--import` and `-r`
-// can load — so it is copied as written rather than compiled.
-copyFileSync('server/auto/preload.cjs', 'dist/server/auto/preload.cjs');
+// The CommonJS entry behind `require('routelens')` is written as CommonJS and
+// copied as it is: compiling it would turn its `import()` into `require`,
+// which is the one thing it exists to avoid.
+copyFileSync('server/index.cjs', 'dist/server/index.cjs');
 
 // npm marks bin targets executable on install; this covers `npm link` and
 // running the CLI straight out of a checkout.

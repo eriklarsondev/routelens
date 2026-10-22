@@ -32,9 +32,9 @@ export interface ProjectConfig {
 
 /**
  * A project's own settings: `routelens.config.json` at the root, or a
- * `"routelens"` key in its package.json. The CLI and auto-mount have no other
- * way to be told about a project's HTTP client wrapper or what its middleware
- * names mean, so the scan reads them itself. JSON only — routelens has no
+ * `"routelens"` key in its package.json. The CLI has no other way to be told
+ * about a project's HTTP client wrapper or what its middleware names mean, so
+ * the scan reads them itself. JSON only — routelens has no
  * dependencies and reads it on every scan, synchronously.
  */
 export function loadProjectConfig(root: string): ProjectConfig {
@@ -75,8 +75,10 @@ function validate(value: unknown, source: string): ProjectConfig {
   for (const [key, setting] of Object.entries(value)) {
     // `$schema` and the like are for editors, not for us.
     if (key.startsWith('$')) continue;
-    // The install step reads `autoMount` from package.json itself (auto/postinstall.ts).
-    if (key === 'autoMount' && source === 'package.json#routelens') continue;
+    if (key === 'autoMount') {
+      problems.push(`${source}: "autoMount" does nothing since routelens stopped mounting itself — remove it`);
+      continue;
+    }
     const shape = KEYS[key as keyof FileOptions];
     if (!shape) {
       problems.push(`${source}: unknown setting "${key}"`);

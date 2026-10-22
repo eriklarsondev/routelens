@@ -1,49 +1,52 @@
 #!/usr/bin/env node
-import type { ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import {
-  addDevCommand,
-  detectPackageManager,
-  runCommand,
-  runScriptCommand,
-} from './auto/package-manager.js';
-import { applyWiring, ejectWiring, planWiring, type WirePlan, type WireResult } from './auto/wire.js';
+import { resolve } from 'node:path';
 import { guessDevServer } from './dev-server.js';
 import { scan } from './scan.js';
 import { serve } from './http-server.js';
+import { mountSnippets, type MountEdit, type MountSnippet } from './snippet.js';
 import type { ClientCall, ClientPage, ScanResult, ServerRoute } from './types.js';
 
-const HELP = `routelens — see every endpoint in your app
+const HELP = `routelens — see every endpoint and page in your app
 
 Usage
-  routelens init [dir]         Install routelens in this project and attach the dashboard
-  routelens dev [dir]          Run your dev script with /__routelens on every server it starts
-  routelens dev -- <command>   The same, for a command of your own (routelens dev -- node server.js)
-  routelens [dir]              Open the dashboard (default: current directory)
-  routelens list [dir]         Print every endpoint and page to the terminal
-  routelens json [dir]         Print the full scan as JSON
-  routelens mount [dir]        Wire /__routelens into this project (init does this for you)
-  routelens eject [dir]        Remove everything routelens generated
+  routelens [dir]          Read the project and open the dashboard on its own port
+  routelens list [dir]     Print every endpoint and page to the terminal
+  routelens json [dir]     Print the full scan as JSON
+  routelens mount [dir]    Print the code that puts the dashboard on each of your
+                           dev servers, to paste in (routelens writes nothing)
 
 Options
-  --port <n>                   Dashboard port (default 4477)
-  --target <url>               Origin the endpoint links point at (default: auto-detected)
-  --base-path <path>           Dashboard path (default /__routelens)
-  --open                       Open the dashboard in your browser
-  --no-watch                   Do not re-scan on file changes
-  --ignore <dir>               Extra directory to skip (repeatable)
-  --dry-run                    init: say what it would do, and change nothing
-  --client                     list/json: only client pages and redirects
-  --server                     list/json: only server-side endpoints
-  --issues                     list/json: only unmatched calls, uncalled or unmounted routes, broken links
-  -h, --help                   This message
-  -v, --version                Print the version
+  --port <n>               Dashboard port (default 4477)
+  --target <url>           Origin the endpoint links point at (default: auto-detected)
+  --base-path <path>       Dashboard path (default /__routelens)
+  --open                   Open the dashboard in your browser
+  --no-watch               Do not re-scan on file changes
+  --ignore <dir>           Extra directory to skip (repeatable)
+  --client                 list/json: only client pages and redirects
+  --server                 list/json: only server-side endpoints
+  --issues                 list/json: only unmatched calls, uncalled or unmounted routes, broken links
+  -h, --help               This message
+  -v, --version            Print the version
 `;
 
+/** Commands earlier versions had, and what took their place. */
+const REMOVED: Record<string, string> = {
+  init:
+    'routelens no longer installs or wires itself into a project. Run `npx routelens` to read it, ' +
+    'and `npx routelens mount` for the code that puts the dashboard on your dev server.',
+  dev:
+    'routelens dev is gone: the dashboard is on a dev server only once its code is in that server. ' +
+    '`npx routelens mount` prints it for your project.',
+  eject:
+    'routelens no longer generates files, so there is nothing to eject. An earlier version may have left ' +
+    'app/__routelens/ or pages/api/__routelens/, and a block in .gitignore marked routelens:auto-generated: ' +
+    'delete them.',
+};
+
 interface Args {
-  command: 'serve' | 'list' | 'json' | 'mount' | 'eject' | 'init' | 'dev' | 'help' | 'version';
+  command: 'serve' | 'list' | 'json' | 'mount' | 'help' | 'version' | 'removed';
+  removed?: string;
   dir: string;
   port?: number;
   target?: string;
@@ -52,9 +55,6 @@ interface Args {
   watch: boolean;
   ignore: string[];
   filter: 'all' | 'client' | 'server' | 'issues';
-  dryRun: boolean;
-  /** `dev`: the command after `--`, run instead of the dev script. */
-  run: string[];
 }
 
 function parseArgs(argv: string[]): Args {
@@ -65,17 +65,11 @@ function parseArgs(argv: string[]): Args {
     watch: true,
     ignore: [],
     filter: 'all',
-    dryRun: false,
-    run: [],
   };
   const positional: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg === '--') {
-      args.run = argv.slice(i + 1);
-      break;
-    }
     switch (arg) {
       case '-h':
       case '--help':
@@ -112,9 +106,6 @@ function parseArgs(argv: string[]): Args {
       case '--issues':
         args.filter = 'issues';
         break;
-      case '--dry-run':
-        args.dryRun = true;
-        break;
       default:
         if (arg.startsWith('-')) {
           process.stderr.write(`routelens: unknown option ${arg}\n`);
@@ -124,10 +115,14 @@ function parseArgs(argv: string[]): Args {
     }
   }
 
-  const COMMANDS = ['list', 'json', 'serve', 'mount', 'eject', 'init', 'dev'];
-  if (positional[0] && COMMANDS.includes(positional[0])) {
-    args.command = args.command === 'serve' ? (positional[0] as Args['command']) : args.command;
-    positional.shift();
+  const COMMANDS = ['list', 'json', 'serve', 'mount'];
+  if (positional[0] && args.command === 'serve') {
+    if (COMMANDS.includes(positional[0])) {
+      args.command = positional.shift() as Args['command'];
+    } else if (positional[0] in REMOVED) {
+      args.command = 'removed';
+      args.removed = positional.shift();
+    }
   }
   if (positional[0]) args.dir = positional[0];
 
@@ -145,39 +140,17 @@ async function main(): Promise<void> {
     process.stdout.write(`${version()}\n`);
     return;
   }
+  if (args.command === 'removed') {
+    process.stderr.write(`routelens: ${REMOVED[args.removed!]}\n`);
+    process.exitCode = 1;
+    return;
+  }
 
   const root = resolve(args.dir);
   const options = { root, ignore: args.ignore, watch: args.watch };
 
-  if (args.command === 'init') {
-    process.exitCode = await init(root, args.dryRun);
-    return;
-  }
-
-  if (args.command === 'dev') {
-    process.exitCode = await dev(root, args);
-    return;
-  }
-
   if (args.command === 'mount') {
-    const plan = planWiring(root);
-    const result = applyWiring(root, plan);
-    // The generated file imports routelens, which `npx` alone does not install.
-    const pkg = readPackageJson(root);
-    if (plan.mountPath && pkg && !isDependency(pkg)) {
-      result.skipped.push('routelens is not in package.json, so the file cannot import it: run `npx routelens init`');
-    }
-    process.stdout.write(wiringReport(plan, result));
-    return;
-  }
-
-  if (args.command === 'eject') {
-    const removed = ejectWiring(root);
-    process.stdout.write(
-      removed.length > 0
-        ? `\n  ${bold('routelens')}\n` + removed.map((entry) => `    · ${entry}\n`).join('') + '\n'
-        : '\n  routelens: nothing to remove.\n\n',
-    );
+    process.stdout.write(mountReport(mountSnippets(root, { ignore: args.ignore })));
     return;
   }
 
@@ -202,6 +175,9 @@ async function main(): Promise<void> {
     target,
     targetReason: guess ? guess.reason : '--target',
     targetLive: guess ? guess.live : undefined,
+    // A dashboard on 127.0.0.1 that this person started is no deployed app,
+    // whatever NODE_ENV their shell happens to export.
+    allowInProduction: true,
   });
 
   const result = lens.result();
@@ -216,129 +192,65 @@ async function main(): Promise<void> {
       `${result.stats.pages} pages\n\n` +
       `  ${bold('Dashboard')}  ${url}\n` +
       `  ${dim('Links point at')} ${target} ${targetNote}\n\n` +
+      `  ${dim('On your own dev server instead: npx routelens mount')}\n` +
       `  ${dim('Ctrl+C to stop')}\n\n`,
   );
 
   if (args.open) openBrowser(url);
 }
 
-/**
- * `npx routelens init`: add routelens to the project with its own package
- * manager, then wire it in. The postinstall wires it in too, but pnpm, Bun,
- * `--ignore-scripts` and `file:` links all skip it, so init never relies on it.
- */
-async function init(root: string, dryRun: boolean): Promise<number> {
-  const pkg = readPackageJson(root);
-  if (!pkg) {
-    process.stderr.write(`routelens: no package.json in ${root}. Run this in your app's folder.\n`);
-    return 1;
-  }
-  const install = isDependency(pkg) ? null : addDevCommand(detectPackageManager(root), root);
-
-  if (dryRun) {
-    const plan = planWiring(root);
-    const lines = [
-      `\n  ${bold('routelens init')} ${dim('· dry run, nothing changed')}`,
-      install ? `    · would run ${install}` : '    · routelens is already a dependency',
-      ...plan.actions.map((action) =>
-        action.kind === 'create'
-          ? `    · would create ${action.path}`
-          : action.kind === 'gitignore'
-            ? `    · would add ${action.path} to .gitignore`
-            : `    · ${action.message}`,
-      ),
-    ];
-    process.stdout.write(`${lines.join('\n')}\n\n`);
-    return 0;
-  }
-
-  if (install) {
-    process.stdout.write(`\n  ${dim('$')} ${install}\n\n`);
-    // Wiring happens below; the postinstall doing it as well would only repeat it.
-    const env = { ...process.env, ROUTELENS_NO_AUTO: '1' };
-    const code = await exitCodeOf(runCommand(install, { cwd: root, env }));
-    if (code !== 0) {
-      process.stderr.write(`routelens: \`${install}\` failed, so nothing was wired in.\n`);
-      return code;
-    }
-  }
-
-  const plan = planWiring(root);
-  process.stdout.write(wiringReport(plan, applyWiring(root, plan)));
-  return 0;
-}
+const ROLES: Record<MountSnippet['role'], string> = { server: 'Server', client: 'Client', app: 'App' };
 
 /**
- * `npx routelens dev`: the project's own dev script, with the preload handed to
- * every Node process it starts through NODE_OPTIONS. The dashboard answers on
- * whatever server the app opens, Express to Vite, and no file changes.
+ * What `routelens mount` prints: a section per stack, each piece of code flush
+ * left so it copies cleanly, and where it goes said just above it.
  */
-async function dev(root: string, args: Args): Promise<number> {
-  let command = args.run.join(' ');
-  if (!command) {
-    const scripts = readPackageJson(root)?.scripts ?? {};
-    const script = ['dev', 'start'].find((name) => typeof scripts[name] === 'string');
-    if (!script) {
-      process.stderr.write(
-        'routelens: no "dev" or "start" script in package.json. Name the command instead: ' +
-          'routelens dev -- node server.js\n',
-      );
-      return 1;
-    }
-    command = runScriptCommand(detectPackageManager(root), script);
+function mountReport(snippets: MountSnippet[]): string {
+  if (snippets.length === 0) {
+    return (
+      '\n  routelens found nothing to mount on here: no Express, Fastify, Koa, Hono or NestJS ' +
+      'server, no Next.js app and no Vite config.\n' +
+      `  ${bold('npx routelens')} reads the project without one, on a port of its own.\n\n`
+    );
   }
 
-  // Forward slashes: inside quotes, NODE_OPTIONS reads a backslash as an escape.
-  const preload = fileURLToPath(new URL('./auto/preload.cjs', import.meta.url)).replace(/\\/g, '/');
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require "${preload}"`].filter(Boolean).join(' '),
-    ROUTELENS_ROOT: root,
-  };
-  if (args.basePath) env.ROUTELENS_BASE_PATH = args.basePath;
+  const count = `${snippets.length} ${snippets.length === 1 ? 'stack' : 'stacks'}`;
+  const out = [
+    '',
+    `  ${bold('routelens mount')} ${dim(`· ${count} · nothing was written`)}`,
+    `  ${dim('Paste each piece where it says. Every one runs in local and dev only.')}`,
+  ];
 
-  process.stdout.write(`\n  ${bold('routelens')} ${dim(`· ${command}`)}\n`);
-  const child = runCommand(command, { cwd: root, env });
-  // Ctrl+C already reaches the whole process group, so wait for the dev server
-  // to stop rather than leave it running. A signal sent to routelens alone is
-  // passed on.
-  process.on('SIGINT', () => {});
-  process.on('SIGTERM', () => child.kill('SIGTERM'));
-  return exitCodeOf(child);
-}
-
-function exitCodeOf(child: ChildProcess): Promise<number> {
-  return new Promise((resolveCode) => {
-    child.on('error', () => resolveCode(1));
-    child.on('exit', (code, signal) => resolveCode(code ?? (signal ? 1 : 0)));
+  snippets.forEach((snippet, index) => {
+    out.push('', `  ${bold(`${index + 1}  ${ROLES[snippet.role]} · ${snippet.label}`)}  ${snippet.file}`);
+    for (const edit of snippet.edits) out.push(`     ${dim(where(edit))}`, '', edit.code, '');
+    if (snippet.install) {
+      const place = snippet.install.dir === '.' ? '' : ` in ${snippet.install.dir}/`;
+      out.push(`     ${dim(`Install it${place}:`)} ${snippet.install.command}`);
+    }
+    out.push(`     ${dim('Then open')} ${snippet.path} ${dim('on that dev server.')}`);
+    if (snippet.note) out.push(`     ${dim(snippet.note)}`);
   });
-}
 
-function wiringReport(plan: WirePlan, result: WireResult): string {
-  return (
-    `\n  ${bold('routelens')} ${dim(`· ${plan.framework}`)}\n` +
-    result.done.map((entry) => `    · ${entry}\n`).join('') +
-    result.skipped.map((entry) => `    ! ${entry}\n`).join('') +
-    (plan.mountPath ? `\n  Start your dev server and open ${bold(plan.mountPath)}\n\n` : '\n')
-  );
-}
-
-interface PackageJson {
-  scripts?: Record<string, unknown>;
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
-}
-
-function readPackageJson(root: string): PackageJson | null {
-  try {
-    return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as PackageJson;
-  } catch {
-    return null;
+  if (snippets.length > 1) {
+    out.push('', `  ${dim('Each dashboard tracks its own stack. For all of them in one view, run npx routelens here.')}`);
   }
+  return out.join('\n') + '\n\n';
 }
 
-function isDependency(pkg: PackageJson): boolean {
-  return 'routelens' in { ...pkg.dependencies, ...pkg.devDependencies };
+function where(edit: MountEdit): string {
+  switch (edit.at) {
+    case 'after':
+      return `Below line ${edit.line!.number}:  ${edit.line!.text}`;
+    case 'replace':
+      return `Line ${edit.line!.number} becomes (it was: ${edit.line!.text})`;
+    case 'top':
+      return 'At the top, with the imports:';
+    case 'plugins':
+      return 'In the plugins list:';
+    case 'file':
+      return 'Create the file with:';
+  }
 }
 
 function filterResult(result: ScanResult, filter: Args['filter']) {

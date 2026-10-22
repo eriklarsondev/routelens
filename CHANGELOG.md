@@ -5,6 +5,98 @@ All notable changes to routelens are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+routelens now does two things, and only when asked: `npx routelens` reads a
+project and shows it, and the dashboard appears on a dev server only where
+that server's code puts it, inside a check that keeps it to local and dev.
+
+### Removed
+
+- The `postinstall` script. Installing routelens no longer writes a route file
+  or a `.gitignore` entry into a project.
+- `routelens init`, `routelens dev` and `routelens eject`, the `routelens/auto`
+  preload, and the `routelens/wire` entry point. The preload attached the
+  dashboard to every HTTP server a process created. The three commands still
+  answer, with what took their place.
+- `isProductionLike()`. `isDevelopment()` replaces it, with the new rule below.
+
+### Added
+
+- `routelens mount` prints the code that mounts the dashboard on each stack of
+  a project, for the developer to paste in. It writes nothing. A monolith gets
+  one snippet per stack: its Node server (Express, Fastify, Koa, Hono, NestJS),
+  each Next.js app and each Vite app. Each comes with the file, the line to put
+  it below, and the install command for that package's own package manager.
+  Server snippets read the file they go in: `await import` in an ES module,
+  `require` in CommonJS (TypeScript compiled to it included), and `createRequire`
+  in an ES module that builds its app inside a plain function, where `await`
+  would not parse. A Vite config listing its plugins on one line gets that
+  line back with routelens added.
+- Each mount tracks its own stack. The Vite plugin scans Vite's root and
+  answers under the app's `base` (`/admin/__routelens`), so a proxy that
+  already routes the app's requests routes the dashboard's too.
+- `require('routelens')` works on every supported Node version. Where Node
+  cannot `require` an ES module (before 20.19 and 22.12), it returns the
+  middleware at once and loads the rest with `import()`.
+- `allowedHosts`, for a dev server reached by a name of its own. The Vite plugin
+  takes Vite's `server.allowedHosts`.
+
+### Changed
+
+- The dashboard starts only where `NODE_ENV` is `development`, `local` or
+  unset. It used to refuse only `production`, so staging and test ran it. The
+  standalone CLI ignores `NODE_ENV`: it binds to `127.0.0.1` and is no deployed
+  app. Outside development the Vite plugin stands aside rather than throwing,
+  so a Vitest run never sees it.
+- The dashboard answers its own page and nothing else:
+  - It refuses a request for a host that is not local, which stops a site that
+    points its DNS at `127.0.0.1` from reading the scan (DNS rebinding). Local
+    hosts are `localhost`, private IP addresses and single-label names.
+  - It refuses a page on another site that asks for `/data`, `/events` or
+    `/open`, known by `Sec-Fetch-Site`, or by `Origin` in older browsers.
+  - `/open` takes JSON only, and on a Node server only from the machine the
+    server runs on.
+  - It strips the `Access-Control-*` headers that an app's `cors()` set earlier.
+  - JSON answers carry `Cross-Origin-Resource-Policy: same-origin`, and every
+    answer carries `nosniff`.
+- On Windows, "Open source" runs the editor through `cmd.exe`. Editors install
+  there as `.cmd` shims, which Node cannot start directly, so the button
+  reported "Opened" while nothing happened. A missing editor is now reported
+  as one on every platform.
+- A scan judges calls against routes only when it shows the two talking: at
+  least one call that reaches a route in view. A scan of one stack (a server
+  whose clients live elsewhere, or a client whose server does) no longer lists
+  every route as uncalled, or every call as broken.
+- A dashboard mounted on a client app, with pages and no endpoints, opens on
+  the Client tab.
+
+### Fixed
+
+- The App Router route that earlier versions generated, at
+  `app/__routelens/`, was never routed: the App Router treats a folder that
+  starts with `_` as private. The snippet uses `app/%5F%5Froutelens/`, an
+  escaped underscore that keeps the folder routed.
+- The Pages Router route that earlier versions generated answered under
+  `/__routelens` while living at `/api/__routelens`, so it never answered at
+  all. The snippet passes `basePath: '/api/__routelens'`.
+- "Open source" could open a file outside the project. The check that keeps it
+  inside compared prefixes, so a file in a sibling directory whose name starts
+  with the project's (`../demo-secrets/` beside `demo/`) passed it.
+- The base path written into the dashboard's HTML is escaped, and a base path
+  that is not a URL path is refused.
+
+### Upgrading
+
+- Delete what 0.3 may have generated: `app/__routelens/` (or
+  `src/app/__routelens/`), `pages/api/__routelens/`, and the block in
+  `.gitignore` marked `routelens:auto-generated`. Then run
+  `npx routelens mount` and paste what it prints.
+- Replace `routelens dev` and `node --import routelens/auto` with the snippet
+  for your server.
+- Remove `"autoMount"` from `"routelens"` in package.json. It now does nothing,
+  and the scan says so.
+
 ## [0.3.2] - 2026-10-17
 
 ### Changed
