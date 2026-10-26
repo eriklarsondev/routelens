@@ -1,7 +1,0 @@
-{
-  "name": "astro-site",
-  "private": true,
-  "dependencies": {
-    "astro": "^4.10.0"
-  }
-}

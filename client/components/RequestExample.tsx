@@ -1,5 +1,5 @@
 import { CopyButton } from '@/components/CopyButton';
-import { requestExamples } from '@/lib';
+import { requestExamples } from '@/lib/request';
 import { highlight, type TokenKind } from '@/lib/highlight';
 import { cn } from '@/lib/utils';
 import type { ServerRoute } from '@/types';

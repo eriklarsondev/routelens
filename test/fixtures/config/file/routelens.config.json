@@ -1,6 +1,5 @@
 {
   "$schema": "https://example.com/ignored.json",
-  "clientIdentifiers": ["backend"],
   "middleware": {
     "permission": ["gate", "require*Tier"],
     "other": ["checkCsrf"]

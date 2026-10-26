@@ -1,6 +1,8 @@
 const express = require('express');
+const { routelens } = require('routelens');
 
 const app = express();
+app.use(routelens());
 
 app.get('/api/reports', gate('reports'), (req, res) => res.json([]));
 app.get('/api/pro', requireProTier, (req, res) => res.json({}));

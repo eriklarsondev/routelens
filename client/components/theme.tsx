@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Monitor, Moon, Sun } from '@/components/icons';
-import { Tip } from '@/components/ui/tooltip';
+import { Tip } from '@/components/Tip';
 import { CONTROL } from '@/lib/utils';
 
 export type Theme = 'light' | 'dark' | 'system';
@@ -20,7 +20,7 @@ function stored(): Theme {
   return 'system';
 }
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
+export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(stored);
 
   useEffect(() => {

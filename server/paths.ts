@@ -1,24 +1,8 @@
 import type { Method } from './types.js';
 
-export const METHODS: Method[] = [
-  'GET',
-  'POST',
-  'PUT',
-  'PATCH',
-  'DELETE',
-  'HEAD',
-  'OPTIONS',
-  'ALL',
-  'WS',
-  'SSE',
-];
-
-export function toMethod(raw: string | undefined): Method {
-  if (!raw) return 'UNKNOWN';
-  const upper = raw.toUpperCase();
-  if (upper === 'DEL') return 'DELETE';
-  if (upper === 'USE' || upper === 'ANY' || upper === 'ROUTE') return 'ALL';
-  return (METHODS as string[]).includes(upper) ? (upper as Method) : 'UNKNOWN';
+/** A verb from `router.<verb>()`. `del` is Express's old name for `delete`. */
+export function toMethod(verb: string): Method {
+  return verb === 'del' ? 'DELETE' : (verb.toUpperCase() as Method);
 }
 
 /** Collapse slashes, strip query/hash and trailing slash, force a leading slash. */
@@ -54,30 +38,14 @@ export function joinPath(...parts: Array<string | undefined>): string {
 }
 
 /**
- * Rewrite framework-specific dynamic syntax into one `:param` style so that a
- * Next.js `[id]`, an Express `:id` and a FastAPI `{id}` all compare equal.
+ * Rewrite dynamic segments into one `:param` style: a template literal's
+ * `${id}` becomes `:id`, and an Express parameter loses its pattern.
  */
 export function canonicalizeParams(path: string): string {
   return path
     .split('/')
     .map((segment) => {
       if (!segment) return segment;
-
-      // Next.js: [[...slug]] / [...slug] / [id]
-      const optionalCatchAll = /^\[\[\.\.\.(.+)\]\]$/.exec(segment);
-      if (optionalCatchAll) return `:${optionalCatchAll[1]}*?`;
-      const catchAll = /^\[\.\.\.(.+)\]$/.exec(segment);
-      if (catchAll) return `:${catchAll[1]}*`;
-      const dynamic = /^\[(.+)\]$/.exec(segment);
-      if (dynamic) return `:${dynamic[1]}`;
-
-      // FastAPI / Hono: {id} and {id:path}
-      const braced = /^\{(.+?)(?::.*)?\}$/.exec(segment);
-      if (braced) return `:${braced[1]}`;
-
-      // Flask: <int:id>
-      const angled = /^<(?:[^:>]+:)?([^>]+)>$/.exec(segment);
-      if (angled) return `:${angled[1]}`;
 
       // Template literals: ${id} or prefix-${id}
       if (segment.includes('${')) {
@@ -109,115 +77,25 @@ function simpleName(expression: string): string {
   return tail && /^[A-Za-z_$][\w$]*$/.test(tail) ? tail : 'param';
 }
 
-export interface ParsedUrl {
-  path: string;
-  host?: string;
-  /**
-   * The origin came from an expression we could not resolve, so the request may
-   * well leave this app — `${getSiteBaseUrl()}/oauth/token` is someone else's
-   * endpoint. The path is still worth listing; it is just not evidence of a
-   * missing route.
-   */
-  originUnknown?: boolean;
-}
-
-/**
- * Split a client URL literal into host + path. Handles absolute URLs, protocol
- * relative URLs, and template literals whose origin is an interpolation
- * (`${BASE}/api/x`), which we treat as same-origin.
- */
-export function parseClientUrl(raw: string): ParsedUrl | null {
-  let value = raw.trim();
-  if (!value) return null;
-
-  // `${BASE_URL}/api/users` -> `/api/users`, with the origin left open. By the
-  // time we get here a `${BASE}` naming a local string constant has already
-  // been substituted, so whatever is left really is unknowable.
-  let originUnknown = false;
-  // The origin may take several pieces: `${proto}://${window.location.host}${base}`.
-  const leadingExpression = /^\$\{[^}]*\}(?:\$\{[^}]*\}|:\/\/)*/.exec(value);
-  if (leadingExpression) {
-    value = value.slice(leadingExpression[0].length);
-    // Just an expression and nothing else — there is no endpoint to report.
-    if (value === '' || value === '/') return null;
-    if (!value.startsWith('/')) value = '/' + value;
-    originUnknown = true;
-  }
-
-  const absolute = /^((?:https?|wss?):)?\/\/([^/?#]+)(\/[^?#]*)?/i.exec(value);
-  if (absolute) {
-    const host = `${absolute[1] ?? 'https:'}//${absolute[2]}`;
-    const path = normalizePath(canonicalizeParams(absolute[3] ?? '/'));
-    const localhost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/i.test(absolute[2]!);
-    return localhost ? { path } : { host, path };
-  }
-
-  if (!value.startsWith('/')) return null;
-
-  // Nothing but an expression is left (`fetch(`${base}${path}`)`): the endpoint
-  // is decided at runtime, so report it as a wildcard instead of inventing one.
-  if (/^\/?\$\{[^}]*\}\/?$/.test(value)) return { path: '/*' };
-
-  // A query string kept in a variable and glued on the end (`/report${qs}`) is
-  // not part of the path; left in, it turns the last segment into a wildcard.
-  value = value.replace(
-    /([^/])\$\{\s*(?:qs|query\w*|search\w*|params|querystring)\b(?:[^{}]|\{[^{}]*\})*\}$/i,
-    '$1',
-  );
-
-  return {
-    path: normalizePath(canonicalizeParams(value)),
-    ...(originUnknown ? { originUnknown } : {}),
-  };
-}
-
-/** A pattern where every dynamic segment is a wildcard, for route matching. */
-export function matchKey(path: string): string {
-  return path
-    .split('/')
-    .map((segment) => {
-      if (segment.startsWith(':')) return segment.endsWith('*') || segment.endsWith('*?') ? '**' : '*';
-      if (segment.includes('*')) return '*';
-      return segment.toLowerCase();
-    })
-    .join('/');
-}
-
-/** Does a client path satisfy a route pattern? Wildcards match one segment, `**` the rest. */
-export function pathMatches(routePath: string, callPath: string): boolean {
-  const route = matchKey(routePath).split('/');
-  const call = matchKey(callPath).split('/');
-
-  for (let i = 0; i < route.length; i++) {
-    if (route[i] === '**') return true;
-    if (i >= call.length) return false;
-    if (route[i] === '*' || call[i] === '*') continue;
-    if (route[i] !== call[i]) return false;
-  }
-  return route.length === call.length;
-}
-
-/**
- * `pathMatches` for client routes, where a trailing `*` takes the rest of the
- * path however deep it goes — `/docs/*` serves `/docs/guides/setup`. Server
- * matching keeps `*` to one segment: a server's catch-all usually hands back
- * the app shell, which is not what an API request was after.
- */
-export function pageMatches(pagePath: string, linkPath: string): boolean {
-  // An optional segment (`/:lang?/about`) matches with it and without it.
-  const optional = pagePath.split('/').findIndex((segment) => /^:[\w$]+\?$/.test(segment));
-  if (optional !== -1) {
-    const segments = pagePath.split('/');
-    const present = segments.map((segment, index) => (index === optional ? segment.slice(0, -1) : segment));
-    const absent = segments.filter((_, index) => index !== optional);
-    return pageMatches(present.join('/'), linkPath) || pageMatches(absent.join('/') || '/', linkPath);
-  }
-
-  const splat = pagePath.endsWith('/*') ? pagePath.slice(0, -2) : null;
-  if (splat === null) return pathMatches(pagePath, linkPath);
-  return pathMatches(`${splat}/:rest*`, linkPath);
-}
-
 export function isDynamic(path: string): boolean {
   return path.split('/').some((segment) => segment.startsWith(':') || segment.includes('*'));
+}
+
+/**
+ * `dev/routes/` → `/dev/routes`. The path is written into the dashboard's HTML
+ * and matched against request paths, so anything a URL path cannot hold is
+ * refused rather than escaped.
+ */
+export function normalizeBasePath(input: string): string {
+  let path = input.trim();
+  if (!path.startsWith('/')) path = '/' + path;
+  path = stripTrailingSlash(path);
+  if (!/^\/[\w\-.~!$&'()*+,;=:@%/]*$/.test(path)) {
+    throw new TypeError(`routelens: basePath "${input}" is not a URL path`);
+  }
+  return path;
+}
+
+export function stripTrailingSlash(path: string): string {
+  return path.length > 1 ? path.replace(/\/+$/, '') : path;
 }

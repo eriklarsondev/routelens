@@ -10,8 +10,6 @@ const result = scan({ root });
 const hasRoute = (method, path) =>
   result.routes.some((route) => route.method === method && route.path === path);
 
-const callTo = (path) => result.calls.filter((call) => call.path === path);
-
 test('mounts a router past the middleware arguments', () => {
   assert.ok(hasRoute('GET', '/api/things'), 'router.get("/") under its mount');
   assert.ok(hasRoute('GET', '/api/things/:id'), 'router.get("/:id") under its mount');
@@ -19,27 +17,16 @@ test('mounts a router past the middleware arguments', () => {
   assert.ok(hasRoute('DELETE', '/api/things/:id'), 'router.delete("/:id")');
 });
 
-test('applies a client instance baseURL across a path alias', () => {
-  assert.equal(callTo('/api/things').length, 2, 'GET and POST reach /api/things');
-  assert.equal(callTo('/api/things/:id').length, 1, 'DELETE reaches /api/things/:id');
-  assert.equal(callTo('/things').length, 0, 'the bare call-site path is not reported');
-});
-
-test('a resolved client call is matched to its route', () => {
-  assert.deepEqual(result.unmatchedCalls, [], 'no call is accused of missing a route');
-
-  const get = result.routes.find((route) => route.method === 'GET' && route.path === '/api/things');
-  assert.equal(get.callers.length, 1, 'GET /api/things has its caller');
-});
-
-test('pages/ outside a Next project is not a route tree', () => {
-  assert.equal(hasRoute('GET', '/Account'), false, 'a Vite component is not a page');
-  assert.equal(result.stats.pages, 0, 'no pages at all');
-  assert.equal(result.stats.frameworks.includes('next-pages'), false, 'Next is not detected');
+test('client code beside the server is not an endpoint', () => {
+  assert.equal(
+    result.routes.some((route) => route.source.file.startsWith('client/')),
+    false,
+    'an axios instance in client/ registers nothing',
+  );
 });
 
 test('test files are left out of the scan', () => {
-  assert.equal(callTo('/api/ghost-endpoint-from-a-test').length, 0, 'the test URL is not a call');
+  assert.equal(hasRoute('DELETE', '/api/ghost-endpoint-from-a-test'), false, 'the mock app is not read');
   assert.equal(
     result.routes.some((route) => route.source.file.includes('tests/')),
     false,
@@ -63,21 +50,17 @@ test('a router nothing mounts is flagged, not passed off as a root path', () => 
   }
 });
 
-test('mounted routes are not flagged, and unmounted ones stay out of the other findings', () => {
+test('mounted routes are not flagged', () => {
   const get = result.routes.find((route) => route.path === '/api/things' && route.method === 'GET');
   assert.equal(get.mounted, true, 'a properly mounted route is not flagged');
-
-  const uncalled = result.uncalledRoutes.map((route) => route.path);
-  assert.equal(uncalled.includes('/callback'), false, 'not also counted as uncalled');
-  assert.equal(uncalled.includes('/account'), false, 'not also counted as uncalled');
 });
 
 test('includeTests opts the suite back in', () => {
   const withTests = scan({ root, includeTests: true });
   assert.equal(
-    withTests.calls.some((call) => call.path === '/api/ghost-endpoint-from-a-test'),
+    withTests.routes.some((route) => route.method === 'DELETE' && route.path === '/api/ghost-endpoint-from-a-test'),
     true,
-    'the test URL is reported when asked for',
+    'the mock app is read when asked for',
   );
 });
 

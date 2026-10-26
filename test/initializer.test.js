@@ -7,15 +7,13 @@ import test from 'node:test';
 import { routelens } from '../dist/server/middleware.js';
 
 /**
- * `routelens()` is one initializer for every Node framework, the way `cors()`
- * is for Express: `app.use(routelens())` in Express, Connect, Koa and Hono,
- * `app.register(routelens())` in Fastify. Each is driven through the real
- * framework, since what matters is the shape each one calls middleware with.
+ * `routelens()` is Express middleware, the way `cors()` is:
+ * `app.use(routelens())`. It is driven through real Express, behind a body
+ * parser, since that is how it is mounted.
  */
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
-const root = join(repo, 'test', 'fixtures', 'wrappers');
-const nodeMajor = Number(process.versions.node.split('.')[0]);
+const root = join(repo, 'test', 'fixtures', 'demo');
 
 /** Listen on a free port, run the checks against it, and always shut down. */
 async function listening(server, run) {
@@ -28,7 +26,7 @@ async function listening(server, run) {
   }
 }
 
-/** What every framework must do: the dashboard, its data, its POST, and the app untouched. */
+/** The dashboard, its data, its POST, and the app untouched. */
 async function assertAttached(base) {
   const page = await fetch(`${base}/__routelens`);
   assert.equal(page.status, 200);
@@ -63,63 +61,11 @@ test('Express: app.use(routelens())', async () => {
   }
 });
 
-test('Koa: app.use(routelens())', async () => {
-  const { default: Koa } = await import('koa');
-  const middleware = routelens({ root, watch: false });
-  const app = new Koa();
-  app.use(middleware);
-  app.use((ctx) => {
-    ctx.body = `app ${ctx.url}`;
-  });
-  try {
-    await listening(createServer(app.callback()), assertAttached);
-  } finally {
-    middleware.close();
-  }
-});
-
-test('Hono: app.use(routelens())', async () => {
-  const { Hono } = await import('hono');
-  const middleware = routelens({ root, watch: false });
-  const app = new Hono();
-  app.use(middleware);
-  app.get('/items', (c) => c.text(`app ${new URL(c.req.url).pathname}`));
-  try {
-    const page = await app.request('/__routelens');
-    assert.equal(page.status, 200);
-    assert.match(await page.text(), /<div id="root">/);
-    assert.ok((await (await app.request('/__routelens/data')).json()).routes.length > 0);
-    const open = await app.request('/__routelens/open', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ file: '../outside.js', line: 1 }),
-    });
-    assert.match((await open.json()).error, /escapes the project root/);
-    assert.equal(await (await app.request('/items')).text(), 'app /items');
-  } finally {
-    middleware.close();
-  }
-});
-
-test('Fastify: app.register(routelens())', { skip: nodeMajor < 20 && 'Fastify 5 needs Node 20' }, async () => {
-  const { default: Fastify } = await import('fastify');
-  const app = Fastify();
-  await app.register(routelens({ root, watch: false }));
-  app.get('/items', (request) => `app ${request.url}`);
-  try {
-    // No Fastify route matches /__routelens: routelens answers before routing,
-    // so the dashboard is not a 404 even though Fastify has never heard of it.
-    await app.listen({ port: 0, host: '127.0.0.1' });
-    await assertAttached(`http://127.0.0.1:${app.server.address().port}`);
-  } finally {
-    await app.close();
-  }
-});
-
 test('the initializer says so when it is called some other way', () => {
   const middleware = routelens({ root, watch: false });
   try {
-    assert.throws(() => middleware({ hello: 'world' }), /Express, Koa, Hono or Fastify/);
+    // Koa's `(ctx, next)`, say.
+    assert.throws(() => middleware({ req: {}, res: {} }, async () => {}), /app\.use\(routelens\(\)\)/);
   } finally {
     middleware.close();
   }

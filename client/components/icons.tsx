@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 /**
@@ -5,7 +6,7 @@ import { cn } from '@/lib/utils';
  * an icon library is a dependency and a bundle cost for a few hundred bytes of
  * path data. All share one 24×24 stroked grid so they sit together evenly.
  */
-function Icon({ children, className }: { children: React.ReactNode; className?: string }) {
+function Icon({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <svg
       aria-hidden

@@ -1,22 +1,14 @@
 {
   "name": "routelens",
   "version": "0.3.2",
-  "description": "See every URL in your app: the endpoints your server answers, the pages your client serves, and the calls between them, one click from opening any of them.",
+  "description": "See every endpoint your Express app answers, and what runs in front of each one, one click from opening any of them.",
   "keywords": [
+    "express",
     "routes",
     "endpoints",
-    "pages",
+    "middleware",
     "api",
-    "next",
-    "express",
-    "fastify",
-    "hono",
-    "nest",
-    "fastapi",
-    "react-router",
-    "vue-router",
-    "devtool",
-    "cli"
+    "devtool"
   ],
   "license": "MIT",
   "author": "Erik Larson",
@@ -37,27 +29,15 @@
       "require": "./dist/server/index.cjs",
       "default": "./dist/server/index.js"
     },
-    "./fetch": {
-      "types": "./dist/server/fetch-handler.d.ts",
-      "default": "./dist/server/fetch-handler.js"
-    },
-    "./vite": {
-      "types": "./dist/server/vite.d.ts",
-      "default": "./dist/server/vite.js"
-    },
     "./scan": {
       "types": "./dist/server/scan.d.ts",
       "default": "./dist/server/scan.js"
     },
     "./package.json": "./package.json"
   },
-  "bin": {
-    "routelens": "./dist/server/cli.js"
-  },
   "files": [
     "dist",
     "README.md",
-    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {
@@ -71,20 +51,13 @@
     "dev": "tsc --watch",
     "prepublishOnly": "npm run typecheck && npm test",
     "test": "npm run build && node scripts/test.mjs",
-    "lens": "npm run build && node dist/server/cli.js"
+    "lens": "npm run build && node scripts/lens.mjs"
   },
   "devDependencies": {
-    "@radix-ui/react-tooltip": "^1.4.0",
     "@types/node": "^22.10.2",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
     "esbuild": "^0.28.2",
     "express": "^5.3.0",
-    "fastify": "^5.12.7",
-    "hono": "^4.13.13",
-    "koa": "^3.2.1",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "preact": "^10.29.8",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.2"
   }

@@ -1,7 +1,0 @@
-{
-  "name": "next-gates",
-  "private": true,
-  "dependencies": {
-    "next": "^14.2.0"
-  }
-}

@@ -7,8 +7,6 @@
     "rootDir": "server",
     "outDir": "dist/server",
     "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,

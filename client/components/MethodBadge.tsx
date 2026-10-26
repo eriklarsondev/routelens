@@ -8,11 +8,6 @@ const METHOD_COLOR: Record<string, string> = {
   PATCH: 'text-method-put',
   DELETE: 'text-method-delete',
   WS: 'text-method-realtime',
-  SSE: 'text-method-realtime',
-  // A page is something you GET; a redirect sends you on to one.
-  PAGE: 'text-method-get',
-  REDIRECT: 'text-method-realtime',
-  LINK: 'text-method-post',
 };
 
 /** The text colour a method is drawn in, wherever it appears. */
@@ -43,20 +38,11 @@ export function MethodBadge({
 }
 
 /** Paths read far better when the dynamic segments are picked out. */
-export function PathText({
-  path,
-  host,
-  className,
-}: {
-  path: string;
-  host?: string;
-  className?: string;
-}) {
+export function PathText({ path, className }: { path: string; className?: string }) {
   // How it overflows is the caller's call: a list row clips to one line, the
   // detail heading wraps. Baking in `truncate` here fought both.
   return (
     <span className={cn('font-mono text-[13px]', className)}>
-      {host ? <span className="text-muted-foreground">{host}</span> : null}
       {path.split('/').map((segment, index) => (
         <span key={index}>
           {index > 0 ? <span className="text-muted-foreground/50">/</span> : null}

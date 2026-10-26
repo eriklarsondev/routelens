@@ -7,7 +7,7 @@ declare global {
   }
 }
 
-export const BASE = window.__ROUTELENS_BASE__ ?? '/__routelens';
+const BASE = window.__ROUTELENS_BASE__ ?? '/__routelens';
 
 export async function fetchData(fresh = false): Promise<DashboardData> {
   const response = await fetch(`${BASE}/data${fresh ? '?fresh=1' : ''}`, {

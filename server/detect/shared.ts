@@ -1,17 +1,18 @@
-import type { Framework, Method, MiddlewareRef } from '../types.js';
+import type { Method, MiddlewareRef } from '../types.js';
 
-/** What a detector returns: a route minus the bookkeeping `scan()` adds. */
+/** What the detector returns: a route minus the bookkeeping `scan()` adds. */
 export interface RawRoute {
-  kind: 'api' | 'page';
   method: Method;
   path: string;
-  framework: Framework;
   line: number;
-  /** Defaults to true. False when nothing in the project mounts this route. */
-  mounted?: boolean;
+  /** False when nothing in the project mounts this route. */
+  mounted: boolean;
   /** What runs before the handler, outermost first. */
-  middleware?: MiddlewareRef[];
+  middleware: MiddlewareRef[];
 }
+
+/** The verbs a router registers routes with; `del` is Express's old name for `delete`. */
+export const VERBS = 'get|post|put|patch|delete|del|head|options|all';
 
 /** 1-indexed line number for a character offset. */
 export function lineOf(text: string, index: number): number {
@@ -22,30 +23,6 @@ export function lineOf(text: string, index: number): number {
   return line;
 }
 
-/** HTTP client identifiers that must never be mistaken for a server router. */
-export const CLIENT_IDENTIFIERS = [
-  'axios',
-  'ky',
-  'got',
-  'superagent',
-  'wretch',
-  'needle',
-  'fetch',
-  '$fetch',
-  '$http',
-  '$',
-  'jQuery',
-  'supertest',
-  'request',
-  // Conventional names for a configured client instance. `api.post('/users')`
-  // in a component is a request; none of these ever name a server router.
-  'api',
-  'http',
-  'apiClient',
-  'httpClient',
-  'apiFetch',
-];
-
 /**
  * Identifiers that plausibly name a router or app. Route detection is textual,
  * so `x.get('/users')` needs some reason to believe `x` routes requests — a
@@ -53,5 +30,5 @@ export const CLIENT_IDENTIFIERS = [
  * either, the same shape is far more often a client wrapper.
  */
 export function looksLikeRouter(ident: string): boolean {
-  return /^(app|router|server|fastify|hono|koa|instance|plugin)$/i.test(ident) || /router$/i.test(ident);
+  return /^(app|router|server)$/i.test(ident) || /router$/i.test(ident);
 }

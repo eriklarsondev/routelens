@@ -1,7 +1,0 @@
-{
-  "name": "remix-guards",
-  "private": true,
-  "dependencies": {
-    "@remix-run/react": "^2.9.0"
-  }
-}

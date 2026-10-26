@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { json, text, type LensResponse } from './responses.js';
 
 /**
  * Who may read the dashboard. It maps every endpoint in the app and can open
@@ -9,6 +10,37 @@ import { isIP } from 'node:net';
 
 /** A request's headers with lowercased names, as Node and `Headers` both give them. */
 export type RequestHeaders = Record<string, string | string[] | undefined>;
+
+/** What a page on another site must never get at: the scan, its change feed, and the editor. */
+const PRIVATE_ROUTES = new Set(['/data', '/events', '/open']);
+
+/**
+ * The refusal for a request routelens must not answer, or null: a Host it does
+ * not serve, or another site's page asking for something private. `route` is
+ * the path under the dashboard's base path.
+ */
+export function refusal(
+  headers: RequestHeaders,
+  route: string,
+  allowedHosts: readonly string[] | true,
+): LensResponse | null {
+  const host = hostOf(headers);
+  if (!isAllowedHost(host, allowedHosts)) {
+    const name = hostname(host);
+    return text(
+      403,
+      name
+        ? `routelens refused a request for host "${name}". It answers localhost, private ` +
+            `addresses and single-label names; if "${name}" is your dev server, add it to ` +
+            `allowedHosts: routelens({ allowedHosts: ['${name}'] }).\n`
+        : 'routelens refused a request without a Host header.\n',
+    );
+  }
+  if (PRIVATE_ROUTES.has(route) && isCrossSite(headers)) {
+    return json(403, { ok: false, error: 'routelens answers its own dashboard only' });
+  }
+  return null;
+}
 
 /**
  * Whether a `Host` header names this machine or the developer's own network.
@@ -50,7 +82,7 @@ export function hostname(host: string | undefined): string | null {
 }
 
 /** Loopback, private, link-local, CGNAT (Tailscale) and unspecified addresses. */
-export function isLocalAddress(address: string): boolean {
+function isLocalAddress(address: string): boolean {
   const ip = address.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, '');
   if (isIP(ip) === 4) {
     const [a, b] = ip.split('.').map(Number) as [number, number];
@@ -107,7 +139,7 @@ export function isSameMachine(remoteAddress: string | undefined, localAddress: s
   return localAddress !== undefined && remote === localAddress.replace(/^::ffff:/i, '');
 }
 
-/** The host a request names: `Host`, or `:authority` over HTTP/2, which Vite serves when it serves HTTPS. */
+/** The host a request names: `Host`, or `:authority` over HTTP/2. */
 export function hostOf(headers: RequestHeaders): string | undefined {
   return first(headers.host) ?? first(headers[':authority']);
 }

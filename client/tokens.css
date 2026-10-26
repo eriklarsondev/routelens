@@ -1,0 +1,63 @@
+/*
+ * A zinc base with one accent. Fonts are a system stack rather than a webfont:
+ * the dashboard must render offline and under a strict CSP, so nothing may be
+ * fetched. Geist is listed first for machines that have it.
+ */
+:root {
+  --radius: 0.625rem;
+
+  /* The page sits a shade below the cards, so a card reads as a surface. */
+  --background: oklch(0.979 0.001 286.375);
+  --card: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.546 0.215 262.881);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.546 0.215 262.881);
+
+  /* Method colours, tuned to stay legible on both surfaces. */
+  --method-get: oklch(0.52 0.15 150);
+  --method-post: oklch(0.52 0.17 255);
+  --method-put: oklch(0.52 0.14 75);
+  --method-delete: oklch(0.55 0.21 25);
+  --method-realtime: oklch(0.52 0.19 300);
+  --method-other: oklch(0.552 0.016 285.938);
+  --param: oklch(0.52 0.19 300);
+
+  /* Code examples, in the same hues as the methods so they sit with the rest. */
+  --syntax-keyword: oklch(0.52 0.19 300);
+  --syntax-string: oklch(0.5 0.13 150);
+  --syntax-function: oklch(0.52 0.17 255);
+  --syntax-property: oklch(0.5 0.12 60);
+  --syntax-variable: oklch(0.55 0.2 15);
+}
+
+.dark {
+  --background: oklch(0.141 0.005 285.823);
+  --card: oklch(0.189 0.006 285.885);
+  --foreground: oklch(0.985 0 0);
+  --primary: oklch(0.707 0.165 254.624);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --ring: oklch(0.707 0.165 254.624);
+
+  --method-get: oklch(0.8 0.17 150);
+  --method-post: oklch(0.78 0.13 235);
+  --method-put: oklch(0.83 0.15 85);
+  --method-delete: oklch(0.73 0.17 15);
+  --method-realtime: oklch(0.78 0.15 300);
+  --method-other: oklch(0.705 0.015 286.067);
+  --param: oklch(0.8 0.14 300);
+
+  --syntax-keyword: oklch(0.78 0.15 300);
+  --syntax-string: oklch(0.8 0.15 150);
+  --syntax-function: oklch(0.78 0.13 235);
+  --syntax-property: oklch(0.83 0.13 75);
+  --syntax-variable: oklch(0.75 0.16 15);
+}

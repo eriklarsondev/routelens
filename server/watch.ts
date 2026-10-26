@@ -8,11 +8,11 @@ export interface ProjectWatcher {
 }
 
 /**
- * Files that change what a scan reports without being source: where an app is
- * served from (`.env`, docker-compose), how imports resolve (tsconfig), what a
- * package depends on, and a single-page app's index.html.
+ * Files that change what a scan reports without being source: the project's
+ * settings (routelens.config.json, or package.json) and how imports resolve
+ * (tsconfig).
  */
-const CONFIG_FILE = /^(\.env(\..+)?|(docker-)?compose(\..+)?\.ya?ml|package\.json|routelens\.config\.json|[tj]sconfig(\..+)?\.json|index\.html)$/;
+const CONFIG_FILE = /^(package\.json|routelens\.config\.json|[tj]sconfig(\..+)?\.json)$/;
 
 /**
  * More directories than this and the fallback stops adding watches: Linux caps

@@ -59,7 +59,7 @@ export function renderDashboard(basePath: string): string {
 <div id="root"></div>
 <script>window.__ROUTELENS_BASE__ = ${base};</script>
 <script src="${href}/app.js" defer></script>
-<noscript>routelens needs JavaScript. Use <code>npx routelens list</code> for a terminal listing.</noscript>
+<noscript>routelens needs JavaScript.</noscript>
 </body>
 </html>`;
 }

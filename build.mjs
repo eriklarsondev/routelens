@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-import { build } from 'esbuild';
+import { build, transform } from 'esbuild';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, join, resolve } from 'node:path';
 import { compile } from 'tailwindcss';
 
 /**
- * Builds the React dashboard into two static files that the routelens server
- * serves itself. React, Radix and Tailwind are build-time only — nothing from
- * this bundle reaches the dependency tree of the project routelens is installed
- * into, and the page loads no third-party assets at runtime.
+ * Builds the dashboard into two static files that the routelens server serves
+ * itself. It is written against React's API and runs on Preact, which answers
+ * to the same imports at a fraction of the size. Preact and Tailwind are
+ * build-time only — nothing from this bundle reaches the dependency tree of the
+ * project routelens is installed into, and the page loads no third-party assets
+ * at runtime.
  */
 
 const require = createRequire(import.meta.url);
@@ -29,7 +31,7 @@ const result = await build({
   jsx: 'automatic',
   platform: 'browser',
   legalComments: 'none',
-  alias: { '@': resolve(root, 'client') },
+  alias: { '@': resolve(root, 'client'), react: 'preact/compat', 'react-dom': 'preact/compat' },
   define: { 'process.env.NODE_ENV': '"production"' },
   loader: { '.css': 'empty' },
   metafile: true,
@@ -90,7 +92,12 @@ const compiler = await compile(entryCss, {
   },
 });
 
-const css = compiler.build(collectCandidates(join(root, 'client')));
+// Tailwind writes readable CSS; esbuild minifies it.
+const { code: css } = await transform(compiler.build(collectCandidates(join(root, 'client'))), {
+  loader: 'css',
+  minify: true,
+  target: ['chrome111', 'firefox113', 'safari16.4'],
+});
 writeFileSync(join(root, 'dist/client/app.css'), css, 'utf8');
 
 // --------------------------------------------------------------------- Report

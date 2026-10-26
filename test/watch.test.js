@@ -58,20 +58,21 @@ for (const recursive of [true, false]) {
       };
 
       assert.ok(await changedAfter(() => writeFileSync(join(root, 'src', 'routes.ts'), '// edited\n')), 'a source file');
-      assert.ok(await changedAfter(() => writeFileSync(join(root, '.env'), 'BASE_URL=http://localhost:3000\n')), '.env');
       assert.ok(
-        await changedAfter(() => writeFileSync(join(root, 'docker-compose.dev.yml'), 'services: {}\n')),
-        'a compose file',
+        await changedAfter(() => writeFileSync(join(root, 'routelens.config.json'), '{ "ignore": ["legacy"] }\n')),
+        'the project settings',
       );
+      assert.ok(await changedAfter(() => writeFileSync(join(root, 'tsconfig.json'), '{}\n')), 'tsconfig');
 
       mkdirSync(join(root, 'src', 'added'));
       await pause(300);
       assert.ok(
-        await changedAfter(() => writeFileSync(join(root, 'src', 'added', 'page.tsx'), 'export {};\n')),
+        await changedAfter(() => writeFileSync(join(root, 'src', 'added', 'routes.ts'), 'export {};\n')),
         'a file in a directory created after start-up',
       );
 
       assert.ok(await quietAfter(() => writeFileSync(join(root, 'notes.md'), '# notes\n')), 'a markdown file');
+      assert.ok(await quietAfter(() => writeFileSync(join(root, 'src', 'Page.tsx'), 'export {};\n')), 'a component');
       assert.ok(
         await quietAfter(() => writeFileSync(join(root, 'node_modules', 'dep.js'), 'export {};\n')),
         'node_modules',

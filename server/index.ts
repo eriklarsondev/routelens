@@ -1,22 +1,12 @@
 export { scan } from './scan.js';
-export { createLens, isDevelopment, DEFAULT_BASE_PATH } from './core.js';
-export type { Lens, LensRequest, LensResponse } from './core.js';
+export { DEFAULT_BASE_PATH } from './core.js';
+export { isDevelopment } from './env.js';
 export { routelens } from './middleware.js';
 export type { RouteLensMiddleware } from './middleware.js';
-export { createRouteLensHandler } from './fetch-handler.js';
-export type { FetchHandler } from './fetch-handler.js';
-export { serve } from './http-server.js';
-export type { ServeOptions, ServeResult } from './http-server.js';
-export { renderDashboard } from './dashboard.js';
 export type {
-  ClientApp,
-  ClientCall,
-  ClientLibrary,
-  ClientLink,
-  ClientPage,
-  ClientRouter,
-  Framework,
   Method,
+  MiddlewareKind,
+  MiddlewareRef,
   RouteLensOptions,
   ScanOptions,
   ScanResult,

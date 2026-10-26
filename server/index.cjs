@@ -16,7 +16,7 @@ if (process.features && process.features.require_module) {
   let loading = null;
   const load = () => (loading = loading || import('./index.js'));
 
-  /** The same rule as `isDevelopment` in core.ts, checked at once as the ES module does. */
+  /** The same rule as `isDevelopment` in env.ts, checked at once as the ES module does. */
   const isDevelopment = () => {
     const env = process.env.NODE_ENV;
     return (!env || env === 'development' || env === 'local') && process.env.VERCEL_ENV !== 'production';
@@ -26,8 +26,8 @@ if (process.features && process.features.require_module) {
     if (!isDevelopment() && !options.allowInProduction) {
       throw new Error(
         `routelens refused to start: NODE_ENV is "${process.env.NODE_ENV}". It maps every endpoint in your app, ` +
-          'so it runs in development only (NODE_ENV development, local or unset) — mount it inside the check ' +
-          '`npx routelens mount` prints.',
+          'so it runs in development only (NODE_ENV development, local or unset) — mount it inside the ' +
+          'local-and-dev check in your main server file.',
       );
     }
 
@@ -36,20 +36,13 @@ if (process.features && process.features.require_module) {
     // A failed import surfaces on the first request, not as an unhandled rejection at startup.
     ready.catch(() => {});
 
-    const middleware = function (first, second, third) {
-      if (real) return real(first, second, third);
-      if (typeof third === 'function') {
-        // Express, Connect and Fastify hand over a callback, and errors go to it.
-        ready.then((handler) => handler(first, second, third), third);
-        return undefined;
-      }
-      // Koa and Hono wait on what the middleware returns.
-      return ready.then((handler) => handler(first, second, third));
+    const middleware = function (request, response, next) {
+      if (real) return real(request, response, next);
+      // Until the real middleware has loaded, requests wait for it; errors go to Express.
+      ready.then((handler) => handler(request, response, next), next);
+      return undefined;
     };
 
-    // Fastify scopes a plugin's hooks to the plugin unless it opts out.
-    middleware[Symbol.for('skip-override')] = true;
-    middleware[Symbol.for('fastify.display-name')] = 'routelens';
     Object.defineProperty(middleware, 'lens', {
       get() {
         if (!real) throw new Error('routelens: the dashboard is still loading');

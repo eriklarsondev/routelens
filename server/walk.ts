@@ -30,11 +30,10 @@ export const DEFAULT_IGNORED_DIRS = [
 
 /**
  * Tests are the loudest source of endpoints that do not exist. A suite spins up
- * a mock app, asserts against hardcoded URLs full of fixture ids, and none of it
- * is an endpoint the app serves or a call the app makes. Pass
+ * a mock app, and none of it is an endpoint the app serves. Pass
  * `includeTests: true` to scan them anyway.
  */
-export const TEST_DIRS = [
+const TEST_DIRS = [
   'test',
   'tests',
   '__tests__',
@@ -48,22 +47,10 @@ export const TEST_DIRS = [
   'spec',
 ];
 
-const TEST_FILE = /\.(test|spec)\.[mc]?[jt]sx?$|^conftest\.py$|^test_.*\.py$|_test\.py$/;
+const TEST_FILE = /\.(test|spec)\.[mc]?[jt]s$/;
 
-export const DEFAULT_EXTENSIONS = [
-  '.ts',
-  '.tsx',
-  '.mts',
-  '.cts',
-  '.js',
-  '.jsx',
-  '.mjs',
-  '.cjs',
-  '.vue',
-  '.svelte',
-  '.astro',
-  '.py',
-];
+/** Where an Express server is written. A component (`.tsx`, `.vue`) never registers a route. */
+export const DEFAULT_EXTENSIONS = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs'];
 
 /** Files big enough that they are almost certainly generated, not source. */
 const MAX_FILE_BYTES = 1_500_000;

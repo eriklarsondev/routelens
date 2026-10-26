@@ -1,13 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { Refresh } from '@/components/icons';
 import { ThemeToggle } from '@/components/theme';
-import { Tip } from '@/components/ui/tooltip';
+import { Tip } from '@/components/Tip';
 import { cn, CONTROL, INPUT } from '@/lib/utils';
 import type { DashboardData, TabKey } from '@/types';
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'server', label: 'Server' },
-  { key: 'client', label: 'Client' },
   { key: 'issues', label: 'Issues' },
 ];
 
@@ -48,12 +47,7 @@ export function TopBar({
 
   const counts: Record<TabKey, number> = {
     server: data?.stats.routes ?? 0,
-    client: (data?.stats.pages ?? 0) + (data?.stats.redirects ?? 0),
-    issues:
-      (data?.stats.unmatchedCalls ?? 0) +
-      (data?.stats.uncalledRoutes ?? 0) +
-      (data?.stats.unmountedRoutes ?? 0) +
-      (data?.stats.brokenLinks ?? 0),
+    issues: data?.stats.unmountedRoutes ?? 0,
   };
 
   return (
@@ -86,8 +80,8 @@ export function TopBar({
         value={query}
         placeholder="Filter by path, method, file…   /"
         autoComplete="off"
-        spellCheck={false}
-        onChange={(event) => onQuery(event.target.value)}
+        spellcheck={false}
+        onChange={(event) => onQuery(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             onQuery('');

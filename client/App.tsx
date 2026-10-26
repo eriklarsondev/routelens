@@ -1,82 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { fetchData, onFileChange, openInEditor } from '@/api';
+import { openInEditor } from '@/api';
 import { DetailPanel } from '@/components/DetailPanel';
 import { EndpointList } from '@/components/EndpointList';
 import { StatusBar } from '@/components/StatusBar';
 import { TopBar } from '@/components/TopBar';
-import { entriesFor, groupEntries, isNavigable, matchesQuery, methodsOf } from '@/lib';
+import { useGroups } from '@/hooks/useGroups';
+import { useScan } from '@/hooks/useScan';
+import { entriesFor, matchesQuery } from '@/lib/groups';
+import { isNavigable } from '@/lib/request';
 import { cn } from '@/lib/utils';
-import type { DashboardData, Entry, Group, Method, TabKey } from '@/types';
+import type { Entry, TabKey } from '@/types';
 
 export function App() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
+  const { data, error, scanning, rescan } = useScan();
   const [tab, setTab] = useState<TabKey>('server');
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [hiddenMethods, setHiddenMethods] = useState<Record<string, Method[]>>({});
-  const [cursor, setCursor] = useState<{ label: string; index: number } | null>(null);
-
-  const load = useCallback(async (fresh: boolean) => {
-    if (fresh) setScanning(true);
-    try {
-      setData(await fetchData(fresh));
-      setError(null);
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setScanning(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load(false);
-  }, [load]);
-
-  // Mounted on a client app, the dashboard has pages and no endpoints: it opens
-  // on what it has rather than on an empty tab. Only once, so a later re-scan
-  // never moves someone off the tab they chose.
-  const [landed, setLanded] = useState(false);
-  useEffect(() => {
-    if (!data || landed) return;
-    setLanded(true);
-    if (data.routes.length === 0 && data.pages.length > 0) setTab('client');
-  }, [data, landed]);
-
-  // The server watches the project and pings when a scanned file changes.
-  useEffect(() => onFileChange(() => void load(true)), [load]);
 
   const entries = useMemo<Entry[]>(() => {
     if (!data) return [];
     return entriesFor(data, tab).filter((entry) => matchesQuery(entry, query));
   }, [data, tab, query]);
 
-  const groups = useMemo<Group[]>(
-    () =>
-      groupEntries(entries).map((group) => {
-        // Filtering is a request to see what matched, so it opens every card.
-        const open = Boolean(query) || !collapsed.has(group.label);
-        const methods = methodsOf(group.entries);
-
-        // A method switched off in a card that no longer has it — because the
-        // filter removed those rows — is not held against the card.
-        const hidden = (hiddenMethods[group.label] ?? []).filter((method) =>
-          methods.includes(method),
-        );
-        const matching = group.entries.filter((entry) => !hidden.includes(entry.method));
-
-        return {
-          ...group,
-          open,
-          methods,
-          hidden,
-          cursor: cursor?.label === group.label ? cursor.index : null,
-          visible: open ? matching : [],
-        };
-      }),
-    [entries, query, collapsed, hiddenMethods, cursor],
+  const { groups, cursor, currentGroup, toggleMethod, moveCursor, toggleGroup, clearCursor } = useGroups(
+    entries,
+    query,
+    selectedId,
   );
 
   // What the keyboard can reach: on-screen rows, in the order they appear.
@@ -98,44 +47,6 @@ export function App() {
     [navigable, selectedId],
   );
 
-  /** Switch one method off, or back on. Everything is on until turned off. */
-  const toggleMethod = useCallback((label: string, method: Method) => {
-    setHiddenMethods((prev) => {
-      const current = prev[label] ?? [];
-      const hidden = current.includes(method)
-        ? current.filter((other) => other !== method)
-        : [...current, method];
-
-      const next = { ...prev };
-      if (hidden.length > 0) next[label] = hidden;
-      else delete next[label];
-      return next;
-    });
-  }, []);
-
-  /** The card the keyboard is working in: the one holding the selection. */
-  const currentGroup = useMemo(
-    () =>
-      groups.find((group) => group.visible.some((entry) => entry.id === selectedId)) ??
-      groups.find((group) => group.open) ??
-      null,
-    [groups, selectedId],
-  );
-
-  /** Point the keyboard at the next method tab along, wrapping at the ends. */
-  const moveCursor = useCallback(
-    (delta: number) => {
-      const group = currentGroup;
-      if (!group || !group.open || group.methods.length < 2) return;
-
-      setCursor((prev) => {
-        const from = prev?.label === group.label ? prev.index : delta > 0 ? -1 : 0;
-        const index = (from + delta + group.methods.length) % group.methods.length;
-        return { label: group.label, index };
-      });
-    },
-    [currentGroup],
-  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -171,20 +82,13 @@ export function App() {
         void openInEditor(selected.source.file, selected.source.line);
       } else if (event.key === 'Escape') {
         setSelectedId(null);
-        setCursor(null);
+        clearCursor();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [move, moveCursor, toggleMethod, cursor, currentGroup, selected]);
+  }, [move, moveCursor, toggleMethod, clearCursor, cursor, currentGroup, selected]);
 
-  const toggleGroup = useCallback((label: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(label)) next.add(label);
-      return next;
-    });
-  }, []);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -193,7 +97,7 @@ export function App() {
         tab={tab}
         query={query}
         scanning={scanning}
-        onRescan={() => void load(true)}
+        onRescan={rescan}
         onTab={(next) => {
           setTab(next);
           setSelectedId(null);
@@ -208,7 +112,6 @@ export function App() {
         <div className="min-h-0 overflow-y-auto">
           <EndpointList
             data={data}
-            tab={tab}
             groups={groups}
             empty={entries.length === 0}
             selectedId={selectedId}

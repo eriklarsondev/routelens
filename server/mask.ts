@@ -3,15 +3,9 @@
  * regex matches on the masked text still map to real line numbers in the file.
  * Commented-out routes are a common source of phantom endpoints.
  */
-export function maskComments(text: string, ext: string): string {
-  return ext === '.py' ? maskPython(text) : maskJs(text);
-}
-
-type JsState = 'code' | 'line' | 'block' | 'single' | 'double' | 'template' | 'regex';
-
-function maskJs(text: string): string {
+export function maskComments(text: string): string {
   const out = text.split('');
-  let state: JsState = 'code';
+  let state: 'code' | 'line' | 'block' | 'single' | 'double' | 'template' = 'code';
 
   for (let i = 0; i < text.length; i++) {
     const char = text[i]!;
@@ -64,52 +58,6 @@ function maskJs(text: string): string {
       default:
         break;
     }
-  }
-
-  return out.join('');
-}
-
-function maskPython(text: string): string {
-  const out = text.split('');
-  let i = 0;
-  let inString: '"""' | "'''" | '"' | "'" | null = null;
-
-  while (i < text.length) {
-    const char = text[i]!;
-
-    if (inString) {
-      if (char === '\\' && inString.length === 1) {
-        i += 2;
-        continue;
-      }
-      if (text.startsWith(inString, i)) {
-        i += inString.length;
-        inString = null;
-        continue;
-      }
-      if (inString.length === 1 && char === '\n') inString = null;
-      i++;
-      continue;
-    }
-
-    if (text.startsWith('"""', i) || text.startsWith("'''", i)) {
-      inString = text.slice(i, i + 3) as '"""' | "'''";
-      i += 3;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      inString = char;
-      i++;
-      continue;
-    }
-    if (char === '#') {
-      while (i < text.length && text[i] !== '\n') {
-        out[i] = ' ';
-        i++;
-      }
-      continue;
-    }
-    i++;
   }
 
   return out.join('');

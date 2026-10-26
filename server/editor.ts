@@ -1,10 +1,36 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { isAbsolute, resolve, sep } from 'node:path';
+import type { LensRequest } from './core.js';
+import { first, isSameMachine } from './guard.js';
+import { json, type LensResponse } from './responses.js';
 
 export interface OpenOutcome {
   ok: boolean;
   error?: string;
+}
+
+/** `POST /open` with `{ file, line }`: the dashboard asking to open a source file. */
+export async function openRequest(request: LensRequest, root: string): Promise<LensResponse> {
+  // A JSON body cannot be sent across sites without a preflight, which
+  // routelens never grants — a second lock behind the site check.
+  if (!/^application\/json\b/i.test(first(request.headers?.['content-type']) ?? '')) {
+    return json(415, { ok: false, error: 'Expected application/json' });
+  }
+  // Someone else on the network could otherwise open files on this machine.
+  if (request.remoteAddress !== undefined && !isSameMachine(request.remoteAddress, request.localAddress)) {
+    return json(403, { ok: false, error: 'Open the dashboard on the machine running the dev server to open files' });
+  }
+  let payload: { file?: unknown; line?: unknown };
+  try {
+    payload = JSON.parse(request.body || '{}');
+  } catch {
+    return json(400, { ok: false, error: 'Invalid JSON' });
+  }
+  if (typeof payload.file !== 'string' || !payload.file) return json(400, { ok: false, error: 'Missing file' });
+  const line = typeof payload.line === 'number' && Number.isInteger(payload.line) ? payload.line : 1;
+  const outcome = await openInEditor(root, payload.file, line);
+  return json(outcome.ok ? 200 : 500, outcome);
 }
 
 /**

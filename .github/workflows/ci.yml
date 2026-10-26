@@ -47,24 +47,19 @@ jobs:
           mkdir ../smoke && cd ../smoke
           npm init -y > /dev/null
           npm install --save-dev "$GITHUB_WORKSPACE"/routelens-*.tgz
-          npx routelens --version
-          npx routelens list "$GITHUB_WORKSPACE/test/fixtures/demo" > /dev/null
+          # It is mounted, never run: there is no command to call.
+          test ! -e node_modules/.bin/routelens
           node --input-type=module -e "
             import { scan } from 'routelens/scan';
-            const result = scan({ root: '$GITHUB_WORKSPACE/test/fixtures/spa' });
-            if (result.routes.length + result.pages.length === 0) process.exit(1);
+            const result = scan({ root: '$GITHUB_WORKSPACE/test/fixtures/demo' });
+            if (result.routes.length === 0 || result.mountedIn.length !== 1) process.exit(1);
             console.log(result.stats);
           "
           node --input-type=module -e "
             import { routelens } from 'routelens';
-            import { createRouteLensHandler } from 'routelens/fetch';
-            import { routelensVite } from 'routelens/vite';
-            for (const fn of [routelens, createRouteLensHandler, routelensVite]) {
-              if (typeof fn !== 'function') process.exit(1);
-            }
+            if (typeof routelens !== 'function') process.exit(1);
           "
           node -e "if (typeof require('routelens').routelens !== 'function') process.exit(1)"
-          npx routelens mount "$GITHUB_WORKSPACE/test/fixtures/demo" > /dev/null
           # Installing must leave the project exactly as it was: no file, no script.
           test -z "$(git -C "$GITHUB_WORKSPACE" status --porcelain)"
           test "$(LC_ALL=C ls -A)" = "$(printf 'node_modules\npackage-lock.json\npackage.json')"

@@ -7,56 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-routelens now does two things, and only when asked: `npx routelens` reads a
-project and shows it, and the dashboard appears on a dev server only where
-that server's code puts it, inside a check that keeps it to local and dev.
+routelens is now Express middleware, and nothing else. Mount it in your main
+server file, inside a check that keeps it to local and dev, and it shows every
+endpoint the app it is mounted on answers, and what runs in front of each one.
+There is no command to run, and nothing guesses which file is the server.
 
 ### Removed
 
+- Everything on the client side: pages and redirects, links between them,
+  which pages are public, the client calls made to each endpoint, and the
+  findings built on them (unmatched calls, uncalled routes, broken links).
+  The dashboard's Client tab is gone, and the Issues tab lists routers nothing
+  mounts.
+- Every framework but Express: Next.js, NestJS, Fastify, Koa, Hono, SvelteKit,
+  Nuxt, Remix, Astro, FastAPI, Flask and Django. Only `.js`, `.ts` and their
+  module variants are read; `.tsx`, `.vue`, `.svelte`, `.astro` and `.py` are
+  not.
+- From `ScanResult`: `calls`, `pages`, `apps`, `links`, `brokenLinks`,
+  `unmatchedCalls` and `uncalledRoutes`, and the matching counts in `stats`,
+  along with `stats.frameworks` and `stats.routers`. From `ServerRoute`:
+  `kind`, `framework` and `callers`. The `ClientCall`, `ClientPage`,
+  `ClientApp`, `ClientLink`, `ClientLibrary`, `ClientRouter`, `PageUnlock` and
+  `Framework` types. `SSE` is no longer a method.
+- The scan options `apiPrefixes`, `clientIdentifiers`, `includePages` and
+  `includeExternal`. In a project's settings file they are skipped, and the
+  scan says so.
+- The `routelens` command, all of it: `npx routelens` and its dashboard on a
+  port of its own, `list`, `json`, `mount`, and the `init`, `dev` and `eject`
+  that 0.3 had. With it go the guesses it made: which file is the server, and
+  which port the dev server is on (from the `dev` script, `.env` and
+  `BASE_URL`, and by probing). The package has no `bin`.
+- `serve()`, `createLens()` and `renderDashboard()`, which ran the dashboard
+  somewhere other than an Express app, and the `target`, `targetReason` and
+  `targetLive` options behind the standalone dashboard's links. Endpoint links
+  are on the dashboard's own origin.
+- `routelens()` is Express middleware only. It no longer serves Koa, Hono or
+  Fastify, and it throws when called any way but Express's.
 - The `postinstall` script. Installing routelens no longer writes a route file
   or a `.gitignore` entry into a project.
-- `routelens init`, `routelens dev` and `routelens eject`, the `routelens/auto`
-  preload, and the `routelens/wire` entry point. The preload attached the
-  dashboard to every HTTP server a process created. The three commands still
-  answer, with what took their place.
+- The `routelens/auto` preload and the `routelens/wire` entry point. The
+  preload attached the dashboard to every HTTP server a process created.
+- `routelens/fetch` and `routelens/vite`, the entry points for Next.js and Vite.
 - `isProductionLike()`. `isDevelopment()` replaces it, with the new rule below.
 
 ### Added
 
-- `routelens mount` prints the code that mounts the dashboard on each stack of
-  a project, for the developer to paste in. It writes nothing. A monolith gets
-  one snippet per stack: its Node server (Express, Fastify, Koa, Hono, NestJS),
-  each Next.js app and each Vite app. Each comes with the file, the line to put
-  it below, and the install command for that package's own package manager.
-  Server snippets read the file they go in: `await import` in an ES module,
-  `require` in CommonJS (TypeScript compiled to it included), and `createRequire`
-  in an ES module that builds its app inside a plain function, where `await`
-  would not parse. A Vite config listing its plugins on one line gets that
-  line back with routelens added.
-- Each mount tracks its own stack. The Vite plugin scans Vite's root and
-  answers under the app's `base` (`/admin/__routelens`), so a proxy that
-  already routes the app's requests routes the dashboard's too.
+- The dashboard shows the app it is mounted on. The scan starts from the
+  file that calls `app.use(routelens())` — following an app another file
+  built (`import app from './app'`, `createApp()`), and from a router up to
+  the app it is part of — rather than treating every file that builds an app
+  or calls `.listen()` as a server. Another app in the same repository is
+  listed as not mounted. `ScanResult.mountedIn` says where routelens is
+  mounted, and the dashboard names that line. A scan that finds no
+  `app.use(routelens())` places no route and says why.
+- The README's snippet to paste, in three forms: `await import` in an ES
+  module, `require` in CommonJS (TypeScript compiled to it included), and
+  `createRequire` in an ES module that builds its app inside a plain
+  function, where `await` would not parse.
 - `require('routelens')` works on every supported Node version. Where Node
   cannot `require` an ES module (before 20.19 and 22.12), it returns the
   middleware at once and loads the rest with `import()`.
-- `allowedHosts`, for a dev server reached by a name of its own. The Vite plugin
-  takes Vite's `server.allowedHosts`.
+- `allowedHosts`, for a dev server reached by a name of its own.
 
 ### Changed
 
 - The dashboard starts only where `NODE_ENV` is `development`, `local` or
-  unset. It used to refuse only `production`, so staging and test ran it. The
-  standalone CLI ignores `NODE_ENV`: it binds to `127.0.0.1` and is no deployed
-  app. Outside development the Vite plugin stands aside rather than throwing,
-  so a Vitest run never sees it.
+  unset. It used to refuse only `production`, so staging and test ran it.
 - The dashboard answers its own page and nothing else:
   - It refuses a request for a host that is not local, which stops a site that
     points its DNS at `127.0.0.1` from reading the scan (DNS rebinding). Local
     hosts are `localhost`, private IP addresses and single-label names.
   - It refuses a page on another site that asks for `/data`, `/events` or
     `/open`, known by `Sec-Fetch-Site`, or by `Origin` in older browsers.
-  - `/open` takes JSON only, and on a Node server only from the machine the
-    server runs on.
+  - `/open` takes JSON only, and only from the machine the server runs on.
   - It strips the `Access-Control-*` headers that an app's `cors()` set earlier.
   - JSON answers carry `Cross-Origin-Resource-Policy: same-origin`, and every
     answer carries `nosniff`.
@@ -64,22 +87,24 @@ that server's code puts it, inside a check that keeps it to local and dev.
   there as `.cmd` shims, which Node cannot start directly, so the button
   reported "Opened" while nothing happened. A missing editor is now reported
   as one on every platform.
-- A scan judges calls against routes only when it shows the two talking: at
-  least one call that reaches a route in view. A scan of one stack (a server
-  whose clients live elsewhere, or a client whose server does) no longer lists
-  every route as uncalled, or every call as broken.
-- A dashboard mounted on a client app, with pages and no endpoints, opens on
-  the Client tab.
+- The dashboard re-scans when a source file, `package.json`,
+  `routelens.config.json` or a `tsconfig` changes. A `.env`, a compose file or
+  an `index.html` no longer triggers one.
+- routelens is not listed as middleware in front of the routes registered
+  after it: it passes every other request on.
+- The dashboard runs on Preact instead of React, through the same code, and
+  its tooltips are its own instead of Radix's. Its script is 55 kB instead of
+  315 kB, and its stylesheet is minified.
+- The package is a third of its size: 61 kB packed instead of 185 kB. It ships
+  no source maps, the compiled JavaScript has no comments, declarations ship
+  only for what the entry points export, and `CHANGELOG.md` is no longer in
+  the tarball.
 
 ### Fixed
 
-- The App Router route that earlier versions generated, at
-  `app/__routelens/`, was never routed: the App Router treats a folder that
-  starts with `_` as private. The snippet uses `app/%5F%5Froutelens/`, an
-  escaped underscore that keeps the folder routed.
-- The Pages Router route that earlier versions generated answered under
-  `/__routelens` while living at `/api/__routelens`, so it never answered at
-  all. The snippet passes `basePath: '/api/__routelens'`.
+- A router named like an HTTP client — `const api = express.Router()` — had
+  its routes skipped, because `api`, `http`, `request` and a few other names
+  were taken to be client calls even where the file constructed a router.
 - "Open source" could open a file outside the project. The check that keeps it
   inside compared prefixes, so a file in a sibling directory whose name starts
   with the project's (`../demo-secrets/` beside `demo/`) passed it.
@@ -90,12 +115,20 @@ that server's code puts it, inside a check that keeps it to local and dev.
 
 - Delete what 0.3 may have generated: `app/__routelens/` (or
   `src/app/__routelens/`), `pages/api/__routelens/`, and the block in
-  `.gitignore` marked `routelens:auto-generated`. Then run
-  `npx routelens mount` and paste what it prints.
-- Replace `routelens dev` and `node --import routelens/auto` with the snippet
-  for your server.
-- Remove `"autoMount"` from `"routelens"` in package.json. It now does nothing,
-  and the scan says so.
+  `.gitignore` marked `routelens:auto-generated`. Then paste the README's
+  snippet into your main server file, below the line that creates the app.
+- Replace `npx routelens`, `routelens dev` and `node --import routelens/auto`
+  with that snippet. A `"routes": "routelens"` script in package.json has
+  nothing to run any more.
+- Remove `"autoMount"`, `"apiPrefixes"`, `"clientIdentifiers"`,
+  `"includePages"` and `"includeExternal"` from your settings. They now do
+  nothing, and the scan says so.
+- Code that reads `result.calls`, `result.pages`, `route.callers` or
+  `route.framework` from `scan()` has nothing to read: those are gone. And
+  `scan()` places routes in an app only in a project whose code mounts
+  routelens.
+- Code that called `serve()` or `createLens()` mounts `routelens()` on an
+  Express app instead.
 
 ## [0.3.2] - 2026-10-17
 

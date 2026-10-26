@@ -1,7 +1,7 @@
 import { openInEditor } from '@/api';
 import { Lock, Shield } from '@/components/icons';
-import { Tip } from '@/components/ui/tooltip';
-import { shortSource } from '@/lib';
+import { Tip } from '@/components/Tip';
+import { shortSource } from '@/lib/sources';
 import { cn } from '@/lib/utils';
 import type { MiddlewareRef } from '@/types';
 
