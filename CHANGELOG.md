@@ -5,7 +5,7 @@ All notable changes to routelens are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-26
 
 routelens is now Express middleware, and nothing else. Mount it in your main
 server file, inside a check that keeps it to local and dev, and it shows every
@@ -475,7 +475,8 @@ First release.
 - "Open source" refuses any path that escapes the scan root.
 - No runtime dependencies, and the dashboard loads no third-party assets.
 
-[Unreleased]: https://github.com/eriklarsondev/routelens/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/eriklarsondev/routelens/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/eriklarsondev/routelens/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/eriklarsondev/routelens/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/eriklarsondev/routelens/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/eriklarsondev/routelens/compare/v0.2.0...v0.3.0

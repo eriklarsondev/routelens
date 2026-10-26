@@ -1,6 +1,6 @@
 {
   "name": "routelens",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "See every endpoint your Express app answers, and what runs in front of each one, one click from opening any of them.",
   "keywords": [
     "express",
